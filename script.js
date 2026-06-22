@@ -243,15 +243,19 @@ async function renderHome() {
   app.innerHTML = viewSkeleton();
   try {
     await loadCore(true);
-    // โหลดข้อมูลเสริมหน้าแรก: ประชาสัมพันธ์ + สถิติ + ผลงานล่าสุด (พร้อมกัน)
-    const [announcements, home] = await Promise.all([
-      apiGet('getAnnouncements'),
-      apiGet('getHome')
-    ]);
-    state.announcements = Array.isArray(announcements) ? announcements : [];
-    state.stats = (home && home.stats) ? home.stats : null;
-    state.recentWorks = (home && Array.isArray(home.recentWorks)) ? home.recentWorks : [];
   } catch (err) { app.innerHTML = viewError(err.message); return; }
+
+  // โหลดข้อมูลเสริม: ประชาสัมพันธ์ + สถิติ + ผลงานล่าสุด
+  // ใช้ allSettled เพื่อว่า ถ้าส่วนใดโหลดไม่ได้ (เช่นยังไม่ได้ deploy Code.gs ใหม่)
+  // ก็แค่ซ่อนส่วนนั้น ไม่ทำให้ทั้งหน้าพัง
+  const [annRes, homeRes] = await Promise.allSettled([
+    apiGet('getAnnouncements'),
+    apiGet('getHome')
+  ]);
+  state.announcements = (annRes.status === 'fulfilled' && Array.isArray(annRes.value)) ? annRes.value : [];
+  const home = (homeRes.status === 'fulfilled') ? homeRes.value : null;
+  state.stats = (home && home.stats) ? home.stats : null;
+  state.recentWorks = (home && Array.isArray(home.recentWorks)) ? home.recentWorks : [];
 
   const s = state.settings;
   // สร้าง hero — รูปเป็นพื้นหลัง + เฉดสีโปร่งแสงทาบ + ข้อความหัวเรื่องทับ + เลเยอร์เทคโนโลยีขยับได้
