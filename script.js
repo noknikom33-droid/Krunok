@@ -17,6 +17,9 @@ const API_URL = 'https://script.google.com/macros/s/AKfycbzGmcCrs06fIBNyR1onhuLF
 const state = {
   settings: {},
   subjects: [],
+  announcements: [],  // ประชาสัมพันธ์
+  stats: null,        // สถิติสรุปหน้าแรก
+  recentWorks: [],    // ผลงานนักเรียนล่าสุด
   lessonsCache: {},   // เก็บบทเรียนแยกตาม subject_id
   worksCache: {},     // เก็บผลงานแยกตาม lesson_id
   token: sessionStorage.getItem('cr_token') || null,
@@ -240,11 +243,18 @@ async function renderHome() {
   app.innerHTML = viewSkeleton();
   try {
     await loadCore(true);
+    // โหลดข้อมูลเสริมหน้าแรก: ประชาสัมพันธ์ + สถิติ + ผลงานล่าสุด (พร้อมกัน)
+    const [announcements, home] = await Promise.all([
+      apiGet('getAnnouncements'),
+      apiGet('getHome')
+    ]);
+    state.announcements = Array.isArray(announcements) ? announcements : [];
+    state.stats = (home && home.stats) ? home.stats : null;
+    state.recentWorks = (home && Array.isArray(home.recentWorks)) ? home.recentWorks : [];
   } catch (err) { app.innerHTML = viewError(err.message); return; }
 
   const s = state.settings;
-  // สร้าง hero — กลับมาเป็นแบบเดิม: รูปเป็นพื้นหลัง + เฉดสีโปร่งแสงทาบ + ข้อความหัวเรื่องทับ
-  // ตกแต่งด้วยเลเยอร์ "เครือข่ายเทคโนโลยีขยับได้" (โหนด/เส้นข้อมูลวิ่ง) ให้ดูไฮเทค
+  // สร้าง hero — รูปเป็นพื้นหลัง + เฉดสีโปร่งแสงทาบ + ข้อความหัวเรื่องทับ + เลเยอร์เทคโนโลยีขยับได้
   const cover = imgUrl(s.site_cover_image);
   let heroStyle = '';
   if (cover) {
@@ -262,7 +272,6 @@ async function renderHome() {
 
   // เลือกวิชาที่จะแสดง: นักเรียนเห็นเฉพาะ active / ครูเห็นทั้งหมด
   const subjects = state.subjects.filter(x => isTeacher() || (x.status || 'active') === 'active');
-
   let cardsHtml;
   if (!subjects.length) {
     cardsHtml = viewEmpty('🌱', 'ยังไม่มีวิชา', isTeacher() ? 'กดปุ่ม "เพิ่มวิชา" เพื่อเริ่มต้น' : 'คุณครูกำลังเตรียมบทเรียนอยู่ แวะมาใหม่นะ');
@@ -272,13 +281,143 @@ async function renderHome() {
 
   app.innerHTML = `
     ${heroHtml}
+    ${statsBar()}
+    ${announcementsSection()}
 
     <div class="section-head">
       <h2>วิชาทั้งหมด <span class="count">(${subjects.length})</span></h2>
       <button class="btn btn-primary teacher-only" onclick="openSubjectForm()">➕ เพิ่มวิชา</button>
     </div>
     ${cardsHtml}
+
+    ${featuredWorksSection()}
+    ${aboutSection()}
   `;
+
+  animateStats();   // ทำเลขสถิติวิ่งขึ้น
+}
+
+/* ---- แถบสถิติสรุป (จำนวนวิชา / บทเรียน / ผลงาน) ---- */
+function statsBar() {
+  const st = state.stats;
+  if (!st) return '';
+  const item = (icon, num, label) =>
+    `<div class="stat-item"><div class="stat-ic">${icon}</div><div class="stat-num" data-to="${Number(num) || 0}">0</div><div class="stat-label">${label}</div></div>`;
+  return `<section class="stats-bar">
+    ${item('📚', st.subjects, 'วิชา')}
+    ${item('📖', st.lessons, 'บทเรียน')}
+    ${item('🌟', st.works, 'ผลงานนักเรียน')}
+  </section>`;
+}
+
+// เลขวิ่งขึ้นจาก 0 ถึงค่าจริง (ลูกเล่นแบบเว็บมืออาชีพ)
+function animateStats() {
+  app.querySelectorAll('.stat-num').forEach(el => {
+    const to = Number(el.dataset.to) || 0;
+    if (to === 0) { el.textContent = '0'; return; }
+    const dur = 900, t0 = performance.now();
+    const step = (now) => {
+      const p = Math.min(1, (now - t0) / dur);
+      el.textContent = Math.round(p * to).toLocaleString('th-TH');
+      if (p < 1) requestAnimationFrame(step);
+    };
+    requestAnimationFrame(step);
+  });
+}
+
+/* ---- ส่วนประชาสัมพันธ์/ข่าวสาร ---- */
+function announcementsSection() {
+  // นักเรียนเห็นเฉพาะ active / ครูเห็นทั้งหมด ; ปักหมุด (pin) ขึ้นก่อน แล้วเรียงวันที่ใหม่สุดก่อน
+  const list = state.announcements
+    .filter(a => isTeacher() || (a.status || 'active') === 'active')
+    .sort((a, b) => {
+      const pin = (x) => (String(x.pin).toLowerCase() === 'yes' || x.pin === true ? 1 : 0);
+      if (pin(b) !== pin(a)) return pin(b) - pin(a);
+      return String(b.date || '').localeCompare(String(a.date || ''));
+    });
+  if (!list.length && !isTeacher()) return '';   // ไม่มีประกาศ + เป็นนักเรียน = ซ่อนทั้งส่วน
+
+  const head = `<div class="section-head">
+      <h2>📣 ประชาสัมพันธ์</h2>
+      <button class="btn btn-primary teacher-only" onclick="openAnnounceForm()">➕ เพิ่มประกาศ</button>
+    </div>`;
+  if (!list.length) {
+    return head + viewEmpty('📭', 'ยังไม่มีประกาศ', 'กดปุ่ม "เพิ่มประกาศ" เพื่อแจ้งข่าวถึงนักเรียน');
+  }
+  return head + `<div class="announce-list">${list.map(announceCard).join('')}</div>`;
+}
+
+function announceCard(a) {
+  const pinned = String(a.pin).toLowerCase() === 'yes' || a.pin === true;
+  const hidden = (a.status || 'active') === 'inactive';
+  return `
+    <article class="announce-card ${pinned ? 'pinned' : ''} ${hidden ? 'is-hidden' : ''}">
+      <div class="announce-main">
+        <div class="announce-top">
+          ${pinned ? '<span class="announce-pin">📌 ปักหมุด</span>' : ''}
+          ${hidden ? '<span class="announce-hidetag">ซ่อนอยู่</span>' : ''}
+          <span class="announce-date">${esc(a.date || '')}</span>
+        </div>
+        <h3 class="announce-title">${esc(a.title || '')}</h3>
+        ${a.detail ? `<p class="announce-detail">${esc(a.detail)}</p>` : ''}
+      </div>
+      <div class="announce-tools teacher-only">
+        <button class="btn btn-outline btn-sm" onclick="openAnnounceForm('${esc(a.id)}')">✏️</button>
+        <button class="btn btn-danger btn-sm" onclick="confirmDeleteAnnounce('${esc(a.id)}')">🗑️</button>
+      </div>
+    </article>`;
+}
+
+/* ---- ผลงานนักเรียนเด่น (หน้าแรก) ---- */
+function featuredWorksSection() {
+  const works = state.recentWorks || [];
+  if (!works.length) return '';
+  return `
+    <div class="section-head"><h2>🌟 ผลงานนักเรียนเด่น</h2></div>
+    <div class="works-grid">${works.map((w, i) => homeWorkCard(w, i)).join('')}</div>`;
+}
+
+function homeWorkCard(w, i) {
+  const img = imgUrl(w.image);
+  const imgHtml = img ? `<img src="${esc(img)}" alt="" loading="lazy" onerror="this.parentNode.innerHTML='🖼️'" />` : '🖼️';
+  const inner = `
+    <div class="work-img">${imgHtml}</div>
+    <div class="work-info">
+      <div class="t">${esc(w.work_title || 'ผลงาน')}</div>
+      <div class="by">โดย ${esc(w.student_name || '-')}</div>
+      ${w.lesson_name ? `<div class="work-lesson">📖 ${esc(w.lesson_name)}</div>` : ''}
+    </div>`;
+  return `<div class="work-card" style="animation-delay:${i * 50}ms">${
+    w.work_link ? `<a href="${esc(w.work_link)}" target="_blank" rel="noopener">${inner}</a>` : inner
+  }</div>`;
+}
+
+/* ---- เกี่ยวกับครู + ช่องทางติดตาม ---- */
+function aboutSection() {
+  const s = state.settings;
+  const name = s.about_name || s.site_title || 'คุณครู';
+  const photo = imgUrl(s.about_photo);
+  const socials = [
+    ['social_facebook', '👍 Facebook', s.social_facebook],
+    ['social_line', '💬 LINE', s.social_line],
+    ['social_youtube', '▶️ YouTube', s.social_youtube],
+    ['social_email', '✉️ อีเมล', s.social_email ? (String(s.social_email).includes('@') && !String(s.social_email).startsWith('mailto:') ? 'mailto:' + s.social_email : s.social_email) : '']
+  ].filter(x => x[2]);
+  const socialHtml = socials.length
+    ? `<div class="social-row">${socials.map(x => `<a class="social-btn" href="${esc(x[2])}" target="_blank" rel="noopener">${x[1]}</a>`).join('')}</div>`
+    : (isTeacher() ? '<p class="about-hint">เพิ่มช่องทางติดตาม (Facebook/LINE/YouTube/อีเมล) ได้ในเมนูตั้งค่า</p>' : '');
+
+  return `
+    <div class="section-head"><h2>👩‍🏫 เกี่ยวกับผู้สอน</h2></div>
+    <section class="about-card">
+      <div class="about-photo">${photo ? `<img src="${esc(photo)}" alt="${esc(name)}" onerror="this.parentNode.innerHTML='👩‍🏫'" />` : '👩‍🏫'}</div>
+      <div class="about-info">
+        <h3 class="about-name">${esc(name)}</h3>
+        ${s.about_role ? `<div class="about-role">${esc(s.about_role)}</div>` : ''}
+        ${s.about_text ? `<p class="about-text">${esc(s.about_text)}</p>` : ''}
+        ${socialHtml}
+      </div>
+    </section>`;
 }
 
 // เลเยอร์เอฟเฟกต์เทคโนโลยีขยับได้ — เครือข่ายโหนดเรืองแสง + เส้นข้อมูลวิ่ง + แสงสแกน
@@ -527,6 +666,25 @@ async function renderSettings() {
           <label>ข้อความท้ายเว็บ (Footer)</label>
           <input name="footer_text" value="${esc(s.footer_text || '')}" placeholder="เช่น จัดทำด้วยใจ เพื่อการเรียนรู้" />
         </div>
+
+        <div class="settings-divider">👩‍🏫 เกี่ยวกับผู้สอน</div>
+        <div class="row2">
+          <div class="field"><label>ชื่อผู้สอน</label><input name="about_name" value="${esc(s.about_name || '')}" placeholder="เช่น ครูนก" /></div>
+          <div class="field"><label>ตำแหน่ง/บทบาท</label><input name="about_role" value="${esc(s.about_role || '')}" placeholder="เช่น ครูผู้สอนวิชาคณิตศาสตร์" /></div>
+        </div>
+        ${imageField('about_photo', 'รูปผู้สอน', s.about_photo)}
+        <div class="field"><label>แนะนำตัว / ข้อความถึงนักเรียน</label><textarea name="about_text" placeholder="เล่าสั้น ๆ เกี่ยวกับตัวครูหรือห้องเรียนนี้">${esc(s.about_text || '')}</textarea></div>
+
+        <div class="settings-divider">🔗 ช่องทางติดตาม</div>
+        <div class="row2">
+          <div class="field"><label>Facebook (ลิงก์)</label><input name="social_facebook" value="${esc(s.social_facebook || '')}" placeholder="https://facebook.com/..." /></div>
+          <div class="field"><label>LINE (ลิงก์/Add friend)</label><input name="social_line" value="${esc(s.social_line || '')}" placeholder="https://line.me/..." /></div>
+        </div>
+        <div class="row2">
+          <div class="field"><label>YouTube (ลิงก์)</label><input name="social_youtube" value="${esc(s.social_youtube || '')}" placeholder="https://youtube.com/..." /></div>
+          <div class="field"><label>อีเมล</label><input name="social_email" value="${esc(s.social_email || '')}" placeholder="teacher@email.com" /></div>
+        </div>
+
         <div class="form-actions">
           <button type="button" class="btn btn-outline" onclick="location.hash=''">ยกเลิก</button>
           <button type="submit" class="btn btn-primary">💾 บันทึกการตั้งค่า</button>
@@ -536,7 +694,7 @@ async function renderSettings() {
   `;
 
   wireImageField('site_cover_image');
-  // เชื่อมช่องสีกับช่องข้อความให้ตรงกัน
+  wireImageField('about_photo');
   ['primary_color', 'accent_color'].forEach(name => {
     const c = app.querySelector(`[name=${name}]`), t = app.querySelector(`[name=${name}_text]`);
     c.addEventListener('input', () => t.value = c.value);
@@ -556,7 +714,15 @@ async function renderSettings() {
       site_cover_image: f.elements.site_cover_image.value.trim(),
       primary_color: f.elements.primary_color.value,
       accent_color: f.elements.accent_color.value,
-      footer_text: f.elements.footer_text.value.trim()
+      footer_text: f.elements.footer_text.value.trim(),
+      about_name: f.elements.about_name.value.trim(),
+      about_role: f.elements.about_role.value.trim(),
+      about_photo: f.elements.about_photo.value.trim(),
+      about_text: f.elements.about_text.value.trim(),
+      social_facebook: f.elements.social_facebook.value.trim(),
+      social_line: f.elements.social_line.value.trim(),
+      social_youtube: f.elements.social_youtube.value.trim(),
+      social_email: f.elements.social_email.value.trim()
     };
     const btn = f.querySelector('button[type=submit]');
     btn.disabled = true; btn.textContent = 'กำลังบันทึก...';
@@ -772,6 +938,49 @@ function openWorkForm(id, lessonId) {
 }
 
 /* ============================================================================
+   17.5) ฟอร์มเพิ่ม/แก้ไข ประชาสัมพันธ์
+   ============================================================================ */
+function openAnnounceForm(id) {
+  const a = id ? state.announcements.find(x => x.id === id) || {} : {};
+  const isEdit = !!id;
+  const today = new Date().toISOString().slice(0, 10);
+  const pinned = String(a.pin).toLowerCase() === 'yes' || a.pin === true;
+  openModal(isEdit ? 'แก้ไขประกาศ' : 'เพิ่มประกาศใหม่', `
+    <form id="announceForm" novalidate>
+      <div class="field"><label>หัวข้อประกาศ <span class="req">*</span></label><input name="title" value="${esc(a.title || '')}" placeholder="เช่น เปิดบทเรียนใหม่ / แจ้งสอบ" /><div class="err">กรุณากรอกหัวข้อ</div></div>
+      <div class="field"><label>รายละเอียด</label><textarea name="detail" placeholder="ข้อความที่อยากแจ้งนักเรียน/ผู้ปกครอง">${esc(a.detail || '')}</textarea></div>
+      <div class="row2">
+        <div class="field"><label>วันที่</label><input type="date" name="date" value="${esc(a.date || today)}" /></div>
+        <div class="field"><label>การแสดงผล</label><select name="status"><option value="active" ${(a.status||'active')==='active'?'selected':''}>แสดง (เปิด)</option><option value="inactive" ${a.status==='inactive'?'selected':''}>ซ่อน (ปิด)</option></select></div>
+      </div>
+      <div class="field check-field"><label><input type="checkbox" name="pin" ${pinned ? 'checked' : ''} /> 📌 ปักหมุดให้อยู่บนสุด</label></div>
+      <div class="form-actions">
+        <button type="button" class="btn btn-outline" onclick="closeModal()">ยกเลิก</button>
+        <button type="submit" class="btn btn-primary">${isEdit ? 'บันทึกการแก้ไข' : 'เพิ่มประกาศ'}</button>
+      </div>
+    </form>
+  `);
+  $('#announceForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const f = e.target;
+    const title = f.elements.title.value.trim();
+    f.elements.title.closest('.field').classList.toggle('invalid', !title);
+    if (!title) return;
+    const item = {
+      id: a.id || '', title,
+      detail: f.elements.detail.value.trim(),
+      date: f.elements.date.value || today,
+      pin: f.elements.pin.checked ? 'yes' : 'no',
+      status: f.elements.status.value
+    };
+    await submitForm(f, () => apiPost('saveAnnounce', { item }), 'บันทึกประกาศแล้ว', () => {
+      state.announcements = []; renderHome();
+    });
+  });
+}
+
+
+/* ============================================================================
    18) ตัวช่วยส่งฟอร์ม (กันกดซ้ำ + แจ้งเตือน + รีเฟรชหน้า)
    ============================================================================ */
 async function submitForm(form, apiCall, successMsg, after) {
@@ -833,6 +1042,13 @@ function confirmDeleteWork(id, lessonId) {
   openConfirm('ต้องการลบผลงานนี้ใช่ไหม?', work.work_title || '', '', async () => {
     await apiPost('deleteWork', { id });
     state.worksCache[lessonId] = []; renderLesson(lessonId);
+  });
+}
+function confirmDeleteAnnounce(id) {
+  const a = state.announcements.find(x => x.id === id) || {};
+  openConfirm('ต้องการลบประกาศนี้ใช่ไหม?', a.title || '', '', async () => {
+    await apiPost('deleteAnnounce', { id });
+    state.announcements = []; renderHome();
   });
 }
 
