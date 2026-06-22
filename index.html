@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<!--
+  ห้องเรียนออนไลน์ — index.html
+  ไฟล์นี้คือ "โครงหน้าเว็บ" หลัก ใช้ระบบหน้าเดียว (SPA)
+  เนื้อหาทั้งหมดถูกสร้างด้วย JavaScript ในไฟล์ script.js
+  คุณครูไม่ต้องแก้ไฟล์นี้ ยกเว้นอยากเปลี่ยนข้อความเริ่มต้นเล็กน้อย
+-->
+<html lang="th">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ห้องเรียนออนไลน์</title>
+
+  <!-- ฟอนต์ไทยจาก Google Fonts: Kanit (หัวข้อ) + Sarabun (เนื้อหา) -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Kanit:wght@500;600;700&family=Sarabun:wght@400;500;600&display=swap" rel="stylesheet" />
+
+  <!-- ไฟล์สไตล์ของเรา -->
+  <link rel="stylesheet" href="style.css" />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📚</text></svg>" />
+</head>
+
+<body>
+
+  <!-- ===================== แถบบนสุด (Top bar) ===================== -->
+  <header class="topbar">
+    <a href="#" class="brand" id="brandLink">
+      <span class="brand-logo">📚</span>
+      <span class="brand-name" id="brandName">ห้องเรียนออนไลน์</span>
+    </a>
+
+    <div class="topbar-actions">
+      <!-- ปุ่มเหล่านี้จะแสดง/ซ่อนตามสถานะการเข้าสู่ระบบ (จัดการโดย script.js) -->
+      <button class="btn btn-ghost teacher-only" id="btnSettings" title="ตั้งค่าเว็บไซต์">
+        ⚙️ <span class="btn-label">ตั้งค่าเว็บ</span>
+      </button>
+      <button class="btn btn-ghost" id="btnLogin">🔑 <span class="btn-label">เข้าสู่ระบบครู</span></button>
+      <button class="btn btn-ghost teacher-only" id="btnLogout">🚪 <span class="btn-label">ออกจากระบบ</span></button>
+    </div>
+  </header>
+
+  <!-- ป้ายบอกสถานะ "โหมดครู" เมื่อเข้าสู่ระบบแล้ว -->
+  <div class="teacher-banner teacher-only" id="teacherBanner">
+    ✏️ โหมดครู — คุณสามารถเพิ่ม/แก้ไข/ลบ เนื้อหาได้ทุกส่วน
+  </div>
+
+  <!-- ===================== พื้นที่เนื้อหาหลัก ===================== -->
+  <!-- script.js จะเติมเนื้อหาทั้งหมดลงในกล่องนี้ -->
+  <main id="app" class="app"></main>
+
+  <!-- ===================== ส่วนท้ายเว็บ ===================== -->
+  <footer class="footer">
+    <p id="footerText">จัดทำด้วยใจ เพื่อการเรียนรู้</p>
+  </footer>
+
+  <!-- ===================== กล่อง Modal (ฟอร์มต่างๆ) ===================== -->
+  <!-- ใช้ร่วมกันทุกฟอร์ม script.js จะเปลี่ยนเนื้อหาด้านในตามที่ต้องการ -->
+  <div class="modal-overlay" id="modalOverlay" hidden>
+    <div class="modal" role="dialog" aria-modal="true">
+      <div class="modal-head">
+        <h3 id="modalTitle">หัวข้อ</h3>
+        <button class="modal-close" id="modalClose" aria-label="ปิด">✕</button>
+      </div>
+      <div class="modal-body" id="modalBody"></div>
+    </div>
+  </div>
+
+  <!-- ===================== กล่องแจ้งเตือน (Toast) ===================== -->
+  <div class="toast-wrap" id="toastWrap"></div>
+
+  <!-- ไฟล์ JavaScript หลัก (ใส่ไว้ท้ายสุดเพื่อให้โหลดหน้าก่อน) -->
+  <script src="script.js"></script>
+</body>
+</html>

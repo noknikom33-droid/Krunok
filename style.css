@@ -1,0 +1,338 @@
+/* ============================================================================
+   ห้องเรียนออนไลน์ — style.css
+   จัดรูปแบบหน้าตาเว็บทั้งหมด เป็นมิตรกับเด็กประถม สดใส แต่สะอาดตาทันสมัย
+   สีหลัก/สีรอง ถูกดึงมาจาก "ตั้งค่าเว็บไซต์" ผ่านตัวแปร --primary และ --accent
+   (script.js เป็นคนกำหนดค่าจริงให้ตอนเปิดเว็บ)
+   ============================================================================ */
+
+/* ---------- ตัวแปรสี/ระยะ (เปลี่ยนทีเดียว มีผลทั้งเว็บ) ---------- */
+:root {
+  --primary: #4f8cff;          /* สีหลัก (ค่าเริ่มต้น เผื่อยังโหลด Settings ไม่เสร็จ) */
+  --accent:  #ff7eb6;          /* สีรอง */
+  --primary-soft: #eaf1ff;     /* สีหลักแบบจางๆ ใช้เป็นพื้นหลังอ่อน */
+
+  --ink:     #1f2a44;          /* สีตัวอักษรหลัก */
+  --ink-soft:#5b6b8c;          /* สีตัวอักษรรอง */
+  --line:    #e6ebf5;          /* สีเส้นขอบ */
+  --bg:      #f5f8ff;          /* สีพื้นหลังหน้าเว็บ */
+  --card:    #ffffff;          /* สีพื้นการ์ด */
+
+  --radius:  20px;             /* ความโค้งมุมหลัก */
+  --radius-sm: 12px;
+  --shadow:  0 8px 28px rgba(31, 42, 68, .08);
+  --shadow-lg: 0 18px 50px rgba(31, 42, 68, .16);
+
+  --maxw: 1100px;              /* ความกว้างเนื้อหาสูงสุด */
+}
+
+/* ---------- รีเซ็ตพื้นฐาน ---------- */
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+html { scroll-behavior: smooth; }
+
+body {
+  font-family: 'Sarabun', sans-serif;
+  color: var(--ink);
+  background:
+    radial-gradient(1200px 500px at 100% -5%, var(--primary-soft), transparent 60%),
+    radial-gradient(900px 500px at -10% 10%, color-mix(in srgb, var(--accent) 18%, white), transparent 55%),
+    var(--bg);
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  line-height: 1.6;
+}
+
+h1, h2, h3, .brand-name { font-family: 'Kanit', sans-serif; line-height: 1.25; }
+
+a { color: inherit; text-decoration: none; }
+img { max-width: 100%; display: block; }
+
+/* ============================================================================
+   แถบบนสุด (Top bar)
+   ============================================================================ */
+.topbar {
+  position: sticky; top: 0; z-index: 50;
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 12px;
+  padding: 12px 20px;
+  background: rgba(255, 255, 255, .82);
+  backdrop-filter: blur(10px);
+  border-bottom: 1px solid var(--line);
+}
+.brand { display: flex; align-items: center; gap: 10px; }
+.brand-logo { font-size: 26px; }
+.brand-name {
+  font-weight: 700; font-size: 1.15rem;
+  color: var(--ink);
+  max-width: 60vw; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.topbar-actions { display: flex; align-items: center; gap: 8px; }
+
+/* ป้ายโหมดครู */
+.teacher-banner {
+  background: linear-gradient(90deg, var(--primary), var(--accent));
+  color: #fff; text-align: center;
+  padding: 8px 16px; font-weight: 500; font-size: .92rem;
+}
+
+/* ============================================================================
+   ปุ่มต่างๆ
+   ============================================================================ */
+.btn {
+  font-family: 'Kanit', sans-serif; font-weight: 500; font-size: .95rem;
+  border: 0; border-radius: 999px; cursor: pointer;
+  padding: 9px 16px;
+  display: inline-flex; align-items: center; gap: 6px;
+  transition: transform .15s ease, box-shadow .15s ease, background .15s ease, opacity .15s;
+}
+.btn:active { transform: scale(.96); }
+
+.btn-primary { background: var(--primary); color: #fff; box-shadow: 0 6px 16px color-mix(in srgb, var(--primary) 40%, transparent); }
+.btn-primary:hover { box-shadow: 0 10px 22px color-mix(in srgb, var(--primary) 50%, transparent); transform: translateY(-1px); }
+
+.btn-accent { background: var(--accent); color: #fff; }
+
+.btn-ghost { background: var(--primary-soft); color: var(--primary); }
+.btn-ghost:hover { background: color-mix(in srgb, var(--primary) 18%, white); }
+
+.btn-danger { background: #fdecec; color: #d8453b; }
+.btn-danger:hover { background: #fbdcda; }
+
+.btn-outline { background: #fff; color: var(--ink-soft); border: 1px solid var(--line); }
+.btn-outline:hover { border-color: var(--primary); color: var(--primary); }
+
+.btn-sm { padding: 6px 12px; font-size: .85rem; }
+.btn-block { width: 100%; justify-content: center; }
+
+/* ปุ่มที่ให้เห็นเฉพาะโหมดครู — ซ่อนเป็นค่าเริ่มต้น */
+.teacher-only { display: none !important; }
+body.is-teacher .teacher-only { display: inline-flex !important; }
+body.is-teacher .teacher-banner { display: block !important; }
+
+/* บนจอเล็ก ซ่อนข้อความปุ่ม เหลือแต่ไอคอน */
+@media (max-width: 560px) {
+  .btn-label { display: none; }
+  .btn { padding: 9px 12px; }
+}
+
+/* ============================================================================
+   พื้นที่เนื้อหาหลัก
+   ============================================================================ */
+.app { flex: 1; width: 100%; max-width: var(--maxw); margin: 0 auto; padding: 22px 20px 56px; }
+
+/* ---------- Breadcrumb (เส้นทางนำทาง) ---------- */
+.crumbs { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; font-size: .92rem; color: var(--ink-soft); margin-bottom: 18px; }
+.crumbs a { color: var(--primary); font-weight: 500; }
+.crumbs a:hover { text-decoration: underline; }
+.crumbs .sep { opacity: .5; }
+
+/* ============================================================================
+   Hero banner หน้าแรก
+   ============================================================================ */
+.hero {
+  position: relative; overflow: hidden;
+  border-radius: 28px;
+  padding: 54px 32px;
+  color: #fff;
+  margin-bottom: 34px;
+  background: linear-gradient(135deg, var(--primary), var(--accent));
+  background-size: cover; background-position: center;
+  box-shadow: var(--shadow-lg);
+}
+/* หมายเหตุ: ถ้ามีรูปปกเว็บ script.js จะตั้งพื้นหลังเป็น "ไล่เฉดสีโปร่งแสง + รูป" ทับกัน */
+.hero-title { font-size: clamp(1.9rem, 5vw, 3rem); font-weight: 700; text-shadow: 0 2px 14px rgba(0,0,0,.18); }
+.hero-sub { margin-top: 12px; font-size: clamp(1rem, 2.4vw, 1.2rem); max-width: 620px; opacity: .96; }
+.hero-pill { display: inline-flex; align-items:center; gap:6px; background: rgba(255,255,255,.22); padding: 6px 14px; border-radius: 999px; font-size: .88rem; margin-bottom: 14px; font-family:'Kanit',sans-serif; }
+
+/* ฟองกลมลอยๆ ตกแต่ง hero (ลูกเล่นน่ารัก) */
+.hero .blob { position: absolute; border-radius: 50%; background: rgba(255,255,255,.16); z-index: -1; animation: float 9s ease-in-out infinite; }
+.hero .blob.b1 { width: 180px; height: 180px; top: -50px; right: 8%; }
+.hero .blob.b2 { width: 110px; height: 110px; bottom: -30px; right: 26%; animation-delay: 1.5s; }
+.hero .blob.b3 { width: 70px;  height: 70px;  top: 30%;  right: 2%;  animation-delay: 3s; }
+@keyframes float { 0%,100% { transform: translateY(0) } 50% { transform: translateY(-18px) } }
+
+/* ============================================================================
+   หัวข้อแต่ละส่วน + ปุ่มเพิ่ม
+   ============================================================================ */
+.section-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 18px; flex-wrap: wrap; }
+.section-head h2 { font-size: 1.5rem; color: var(--ink); }
+.section-head .count { color: var(--ink-soft); font-weight: 400; font-size: 1rem; }
+
+/* ============================================================================
+   การ์ด (วิชา / บทเรียน) — แสดงเป็นตาราง grid
+   ============================================================================ */
+.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 20px; }
+
+.card {
+  position: relative;
+  background: var(--card);
+  border-radius: var(--radius);
+  overflow: hidden;
+  box-shadow: var(--shadow);
+  border: 1px solid var(--line);
+  cursor: pointer;
+  transition: transform .22s cubic-bezier(.2,.7,.3,1), box-shadow .22s;
+  display: flex; flex-direction: column;
+  /* แอนิเมชันตอนโหลด: ค่อยๆ ลอยขึ้นมา */
+  animation: cardIn .5s both;
+}
+.card:hover { transform: translateY(-6px); box-shadow: var(--shadow-lg); }
+
+@keyframes cardIn { from { opacity: 0; transform: translateY(16px); } to { opacity: 1; transform: translateY(0); } }
+
+/* ส่วนรูปปกการ์ด — ถ้าไม่มีรูป จะแสดงไอคอน/ตัวอักษรบนพื้นไล่สีแทน */
+.card-cover { aspect-ratio: 16 / 10; background: var(--primary-soft); position: relative; display: flex; align-items: center; justify-content: center; overflow: hidden; }
+.card-cover img { width: 100%; height: 100%; object-fit: cover; transition: transform .3s; }
+.card:hover .card-cover img { transform: scale(1.05); }
+.card-cover .placeholder { font-size: 3.4rem; }
+.card-cover.gradient { background: linear-gradient(135deg, var(--c1, var(--primary)), var(--c2, var(--accent))); color: #fff; }
+
+/* ป้ายระดับชั้น มุมบนซ้าย */
+.badge { position: absolute; top: 10px; left: 10px; background: rgba(255,255,255,.92); color: var(--ink); font-family:'Kanit',sans-serif; font-weight: 600; font-size: .8rem; padding: 4px 10px; border-radius: 999px; box-shadow: 0 2px 8px rgba(0,0,0,.12); }
+
+.card-body { padding: 16px 16px 18px; flex: 1; display: flex; flex-direction: column; gap: 6px; }
+.card-title { font-family:'Kanit',sans-serif; font-weight: 600; font-size: 1.1rem; color: var(--ink); display:flex; align-items:center; gap:8px; }
+.card-desc { color: var(--ink-soft); font-size: .92rem; flex: 1; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+
+/* แถบเครื่องมือครูบนการ์ด (แก้ไข/ลบ) */
+.card-tools { display: none; gap: 6px; margin-top: 10px; }
+body.is-teacher .card-tools { display: flex; }
+
+/* การ์ดที่ปิดการแสดง (status != active) ให้จางลง เห็นเฉพาะครู */
+.card.inactive { opacity: .5; }
+.card.inactive::before { content: "ซ่อนอยู่"; position: absolute; top: 10px; right: 10px; z-index: 2; background: #fff; color: var(--ink-soft); font-size: .72rem; padding: 3px 8px; border-radius: 999px; font-family:'Kanit',sans-serif; }
+
+/* ============================================================================
+   หน้ารายละเอียดบทเรียน
+   ============================================================================ */
+.lesson-hero { display: grid; grid-template-columns: 1.2fr 1fr; gap: 24px; background: var(--card); border:1px solid var(--line); border-radius: var(--radius); overflow: hidden; box-shadow: var(--shadow); margin-bottom: 30px; }
+.lesson-hero .cover { background: var(--primary-soft); min-height: 220px; display:flex; align-items:center; justify-content:center; }
+.lesson-hero .cover img { width:100%; height:100%; object-fit: cover; }
+.lesson-hero .cover .placeholder { font-size: 4.5rem; }
+.lesson-hero .info { padding: 26px; display: flex; flex-direction: column; gap: 14px; justify-content: center; }
+.lesson-hero .info h1 { font-size: 1.8rem; }
+.lesson-hero .info p { color: var(--ink-soft); }
+.lesson-actions { display: flex; gap: 10px; flex-wrap: wrap; }
+
+@media (max-width: 720px) {
+  .lesson-hero { grid-template-columns: 1fr; }
+  .lesson-hero .cover { min-height: 170px; }
+}
+
+/* ============================================================================
+   ผลงานนักเรียน
+   ============================================================================ */
+.works-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 16px; }
+.work-card { background: var(--card); border:1px solid var(--line); border-radius: var(--radius-sm); overflow: hidden; box-shadow: var(--shadow); animation: cardIn .5s both; }
+.work-card .work-img { aspect-ratio: 1/1; background: var(--primary-soft); display:flex; align-items:center; justify-content:center; font-size: 2.4rem; overflow:hidden; }
+.work-card .work-img img { width:100%; height:100%; object-fit: cover; }
+.work-card .work-info { padding: 12px; }
+.work-card .work-info .t { font-family:'Kanit',sans-serif; font-weight:600; font-size:.98rem; }
+.work-card .work-info .by { color: var(--ink-soft); font-size:.85rem; }
+.work-card .work-tools { display:none; gap:6px; padding: 0 12px 12px; }
+body.is-teacher .work-card .work-tools { display:flex; }
+
+/* ============================================================================
+   สถานะต่างๆ: กำลังโหลด / ว่างเปล่า / ผิดพลาด
+   ============================================================================ */
+.state { text-align: center; padding: 60px 20px; color: var(--ink-soft); }
+.state .emoji { font-size: 3.4rem; margin-bottom: 10px; }
+.state h3 { font-family:'Kanit',sans-serif; color: var(--ink); margin-bottom: 6px; }
+
+/* วงกลมหมุนตอนโหลด */
+.spinner { width: 44px; height: 44px; border: 4px solid var(--primary-soft); border-top-color: var(--primary); border-radius: 50%; margin: 0 auto 14px; animation: spin .8s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* การ์ดโครงร่างตอนโหลด (skeleton) */
+.skeleton-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 20px; }
+.skeleton { background: var(--card); border:1px solid var(--line); border-radius: var(--radius); overflow:hidden; box-shadow: var(--shadow); }
+.skeleton .sk-cover { aspect-ratio: 16/10; }
+.skeleton .sk-line { height: 14px; margin: 14px; border-radius: 6px; }
+.skeleton .sk-line.short { width: 55%; }
+.sk-cover, .sk-line { background: linear-gradient(90deg, #eef2f9 25%, #f6f9ff 50%, #eef2f9 75%); background-size: 200% 100%; animation: shimmer 1.3s infinite; }
+@keyframes shimmer { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
+
+/* ============================================================================
+   Modal (กล่องฟอร์มลอย)
+   ============================================================================ */
+.modal-overlay { position: fixed; inset: 0; z-index: 100; background: rgba(20, 28, 48, .5); backdrop-filter: blur(3px); display: flex; align-items: center; justify-content: center; padding: 18px; animation: fadeIn .2s; }
+.modal-overlay[hidden] { display: none; }
+@keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+
+.modal { background: #fff; width: 100%; max-width: 520px; max-height: 90vh; overflow: auto; border-radius: var(--radius); box-shadow: var(--shadow-lg); animation: pop .25s cubic-bezier(.2,.8,.3,1); }
+@keyframes pop { from { transform: scale(.94); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+
+.modal-head { position: sticky; top: 0; background: #fff; display: flex; align-items: center; justify-content: space-between; padding: 18px 22px; border-bottom: 1px solid var(--line); }
+.modal-head h3 { font-size: 1.25rem; }
+.modal-close { background: var(--primary-soft); color: var(--ink-soft); border: 0; width: 34px; height: 34px; border-radius: 50%; font-size: 1rem; cursor: pointer; transition: background .15s; }
+.modal-close:hover { background: #fde2ec; color: #d8453b; }
+.modal-body { padding: 22px; }
+
+/* ============================================================================
+   ฟอร์ม
+   ============================================================================ */
+.field { margin-bottom: 16px; }
+.field label { display: block; font-family:'Kanit',sans-serif; font-weight: 500; font-size: .92rem; margin-bottom: 6px; }
+.field label .req { color: #d8453b; }
+.field input, .field textarea, .field select {
+  width: 100%; font-family: 'Sarabun', sans-serif; font-size: 1rem;
+  padding: 11px 13px; border: 1.5px solid var(--line); border-radius: var(--radius-sm);
+  background: #fbfcff; color: var(--ink); transition: border-color .15s, box-shadow .15s;
+}
+.field input:focus, .field textarea:focus, .field select:focus { outline: none; border-color: var(--primary); box-shadow: 0 0 0 3px color-mix(in srgb, var(--primary) 18%, transparent); }
+.field textarea { min-height: 80px; resize: vertical; }
+.field .hint { font-size: .82rem; color: var(--ink-soft); margin-top: 4px; }
+.field.invalid input, .field.invalid textarea, .field.invalid select { border-color: #d8453b; }
+.field .err { color: #d8453b; font-size: .82rem; margin-top: 4px; display: none; }
+.field.invalid .err { display: block; }
+
+.row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+@media (max-width: 480px) { .row2 { grid-template-columns: 1fr; } }
+
+/* ช่องเลือกสี + ช่องเลือกไอคอน(emoji) */
+.color-field { display: flex; align-items: center; gap: 10px; }
+.color-field input[type=color] { width: 52px; height: 44px; padding: 3px; cursor: pointer; }
+
+/* ช่องใส่รูป: ใส่ลิงก์ หรือ อัปโหลดไฟล์ + พรีวิว */
+.image-field .img-row { display: flex; gap: 8px; }
+.image-field .img-row input { flex: 1; }
+.image-preview { margin-top: 10px; border-radius: var(--radius-sm); overflow: hidden; border: 1px solid var(--line); display: none; }
+.image-preview.show { display: block; }
+.image-preview img { width: 100%; max-height: 180px; object-fit: cover; }
+.uploading { font-size: .85rem; color: var(--primary); margin-top: 6px; display:none; }
+.uploading.show { display:block; }
+
+.form-actions { display: flex; gap: 10px; justify-content: flex-end; margin-top: 22px; padding-top: 16px; border-top: 1px solid var(--line); }
+
+/* กล่องยืนยันการลบ */
+.confirm-box { text-align: center; }
+.confirm-box .big { font-size: 3rem; margin-bottom: 8px; }
+.confirm-box p { color: var(--ink-soft); margin-bottom: 6px; }
+.confirm-box .name { font-family:'Kanit',sans-serif; font-weight: 600; color: var(--ink); }
+
+/* ============================================================================
+   Toast แจ้งเตือน
+   ============================================================================ */
+.toast-wrap { position: fixed; top: 16px; right: 16px; z-index: 200; display: flex; flex-direction: column; gap: 10px; max-width: 90vw; }
+.toast { background: #fff; border-left: 5px solid var(--primary); border-radius: 12px; padding: 12px 16px; box-shadow: var(--shadow-lg); font-size: .95rem; animation: slideInToast .3s; }
+.toast.success { border-left-color: #22c55e; }
+.toast.error { border-left-color: #d8453b; }
+@keyframes slideInToast { from { transform: translateX(40px); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+
+/* ============================================================================
+   ส่วนท้าย
+   ============================================================================ */
+.footer { text-align: center; padding: 26px 20px; color: var(--ink-soft); border-top: 1px solid var(--line); background: rgba(255,255,255,.5); font-size: .92rem; }
+
+/* ============================================================================
+   เคารพการตั้งค่า "ลดการเคลื่อนไหว" ของผู้ใช้ (เพื่อการเข้าถึง)
+   ============================================================================ */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: .001ms !important; transition-duration: .001ms !important; }
+}
+
+/* โฟกัสคีย์บอร์ดให้เห็นชัด (เพื่อการเข้าถึง) */
+a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible, .card:focus-visible {
+  outline: 3px solid color-mix(in srgb, var(--primary) 60%, transparent); outline-offset: 2px;
+}
