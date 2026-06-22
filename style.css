@@ -265,6 +265,78 @@ body.is-teacher .card-tools { display: flex; }
 .work-card .work-info .by { color: var(--ink-soft); font-size:.85rem; }
 .work-card .work-tools { display:none; gap:6px; padding: 0 12px 12px; }
 body.is-teacher .work-card .work-tools { display:flex; }
+.work-card .work-lesson { color: var(--primary); font-size:.8rem; margin-top:4px; }
+
+/* ============================================================================
+   แถบสถิติสรุป
+   ============================================================================ */
+.stats-bar {
+  display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px;
+  margin: -10px 0 30px;
+}
+.stat-item {
+  background: var(--card); border: 1px solid var(--line); border-radius: var(--radius);
+  box-shadow: var(--shadow); padding: 20px 12px; text-align: center;
+  transition: transform .2s, box-shadow .2s; animation: cardIn .5s both;
+}
+.stat-item:hover { transform: translateY(-4px); box-shadow: var(--shadow-lg); }
+.stat-ic { font-size: 1.8rem; }
+.stat-num { font-family: 'Kanit', sans-serif; font-weight: 700; font-size: 2rem; color: var(--primary); line-height: 1.1; }
+.stat-label { color: var(--ink-soft); font-size: .92rem; }
+
+/* ============================================================================
+   ประชาสัมพันธ์
+   ============================================================================ */
+.announce-list { display: flex; flex-direction: column; gap: 12px; margin-bottom: 30px; }
+.announce-card {
+  display: flex; gap: 12px; align-items: flex-start; justify-content: space-between;
+  background: var(--card); border: 1px solid var(--line); border-left: 5px solid var(--primary);
+  border-radius: var(--radius-sm); box-shadow: var(--shadow); padding: 16px 18px;
+  animation: cardIn .4s both;
+}
+.announce-card.pinned { border-left-color: var(--accent); background: linear-gradient(180deg, color-mix(in srgb, var(--accent) 7%, var(--card)), var(--card)); }
+.announce-card.is-hidden { opacity: .6; }
+.announce-top { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 4px; }
+.announce-pin { background: color-mix(in srgb, var(--accent) 18%, transparent); color: color-mix(in srgb, var(--accent) 75%, #000); font-size: .78rem; font-weight: 600; padding: 2px 9px; border-radius: 999px; font-family:'Kanit',sans-serif; }
+.announce-hidetag { background: #eee; color: #777; font-size: .76rem; padding: 2px 9px; border-radius: 999px; }
+.announce-date { color: var(--ink-soft); font-size: .82rem; }
+.announce-title { font-family: 'Kanit', sans-serif; font-size: 1.08rem; margin: 0 0 4px; }
+.announce-detail { color: var(--ink-soft); font-size: .95rem; line-height: 1.55; }
+.announce-tools { display: none; gap: 6px; flex-shrink: 0; }
+body.is-teacher .announce-tools { display: flex; }
+
+/* ============================================================================
+   เกี่ยวกับผู้สอน + ช่องทางติดตาม
+   ============================================================================ */
+.about-card {
+  display: flex; gap: 22px; align-items: center;
+  background: var(--card); border: 1px solid var(--line); border-radius: var(--radius);
+  box-shadow: var(--shadow); padding: 24px; margin-bottom: 30px;
+  background-image: linear-gradient(135deg, var(--primary-soft), transparent 60%);
+}
+.about-photo {
+  flex-shrink: 0; width: 110px; height: 110px; border-radius: 50%;
+  background: var(--primary-soft); display: flex; align-items: center; justify-content: center;
+  font-size: 3rem; overflow: hidden; border: 3px solid var(--card); box-shadow: var(--shadow);
+}
+.about-photo img { width: 100%; height: 100%; object-fit: cover; }
+.about-name { font-family: 'Kanit', sans-serif; font-size: 1.3rem; margin: 0; }
+.about-role { color: var(--primary); font-weight: 600; font-size: .95rem; margin-top: 2px; }
+.about-text { color: var(--ink-soft); line-height: 1.6; margin: 10px 0; }
+.about-hint { color: var(--ink-soft); font-size: .88rem; }
+.social-row { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 12px; }
+.social-btn {
+  display: inline-flex; align-items: center; gap: 6px; text-decoration: none;
+  background: var(--primary-soft); color: var(--ink); font-family:'Kanit',sans-serif; font-size: .9rem;
+  padding: 8px 16px; border-radius: 999px; transition: transform .15s, background .15s;
+}
+.social-btn:hover { transform: translateY(-2px); background: color-mix(in srgb, var(--primary) 20%, transparent); }
+@media (max-width: 560px) { .about-card { flex-direction: column; text-align: center; } .social-row { justify-content: center; } .stats-bar { gap: 8px; } .stat-num { font-size: 1.5rem; } }
+
+/* ตัวคั่นหัวข้อในฟอร์มตั้งค่า + ช่องติ๊กถูก */
+.settings-divider { font-family:'Kanit',sans-serif; font-weight:600; color: var(--primary); margin: 22px 0 12px; padding-bottom: 6px; border-bottom: 2px solid var(--primary-soft); }
+.check-field label { display: flex; align-items: center; gap: 8px; cursor: pointer; }
+.check-field input { width: 18px; height: 18px; }
 
 /* ============================================================================
    สถานะต่างๆ: กำลังโหลด / ว่างเปล่า / ผิดพลาด
