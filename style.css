@@ -133,14 +133,18 @@ body.is-teacher .teacher-banner { display: block !important; }
 .hero {
   position: relative; overflow: hidden;
   border-radius: 28px;
-  padding: 54px 32px;
-  color: #fff;
   margin-bottom: 34px;
-  background: linear-gradient(135deg, var(--primary), var(--accent));
-  background-size: cover; background-position: center;
   box-shadow: var(--shadow-lg);
 }
-/* หมายเหตุ: ถ้ามีรูปปกเว็บ script.js จะตั้งพื้นหลังเป็น "ไล่เฉดสีโปร่งแสง + รูป" ทับกัน */
+/* แบบไล่เฉดสี (ใช้เมื่อยังไม่มีรูปปก) — มี padding + ข้อความทับ */
+.hero-gradient {
+  padding: 54px 32px;
+  color: #fff;
+  background: linear-gradient(135deg, var(--primary), var(--accent));
+}
+/* แบบรูปเต็ม (ใช้เมื่อมีรูปปก) — โชว์รูปทั้งใบ ไม่ครอบตัด ไม่มีอะไรทับ */
+.hero-image { line-height: 0; background: var(--primary-soft); }
+.hero-image .hero-img { width: 100%; height: auto; display: block; }
 .hero-title { font-size: clamp(1.9rem, 5vw, 3rem); font-weight: 700; text-shadow: 0 2px 14px rgba(0,0,0,.18); }
 .hero-sub { margin-top: 12px; font-size: clamp(1rem, 2.4vw, 1.2rem); max-width: 620px; opacity: .96; }
 .hero-pill { display: inline-flex; align-items:center; gap:6px; background: rgba(255,255,255,.22); padding: 6px 14px; border-radius: 999px; font-size: .88rem; margin-bottom: 14px; font-family:'Kanit',sans-serif; }
