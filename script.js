@@ -243,26 +243,22 @@ async function renderHome() {
   } catch (err) { app.innerHTML = viewError(err.message); return; }
 
   const s = state.settings;
-  // สร้าง hero
-  //  - ถ้ามีรูปปก: โชว์รูปเต็มๆ สะอาด ไม่มีสีทาบ ไม่มีข้อความทับ ไม่ครอบตัดรูป
-  //    (เพราะรูปแบนเนอร์มักมีข้อความ/ดีไซน์ครบในตัวอยู่แล้ว)
-  //  - ถ้าไม่มีรูปปก: ใช้พื้นหลังไล่เฉดสี + ข้อความหัวเรื่องตามค่าตั้งค่า
+  // สร้าง hero — กลับมาเป็นแบบเดิม: รูปเป็นพื้นหลัง + เฉดสีโปร่งแสงทาบ + ข้อความหัวเรื่องทับ
+  // ตกแต่งด้วยเลเยอร์ "เครือข่ายเทคโนโลยีขยับได้" (โหนด/เส้นข้อมูลวิ่ง) ให้ดูไฮเทค
   const cover = imgUrl(s.site_cover_image);
-  let heroHtml;
+  let heroStyle = '';
   if (cover) {
-    heroHtml = `
-      <section class="hero hero-image">
-        <img class="hero-img" src="${esc(cover)}" alt="${esc(s.site_title || 'ห้องเรียนออนไลน์')}">
-      </section>`;
-  } else {
-    heroHtml = `
-      <section class="hero hero-gradient">
-        <span class="blob b1"></span><span class="blob b2"></span><span class="blob b3"></span>
-        <span class="hero-pill">📚 ห้องเรียนออนไลน์</span>
-        <h1 class="hero-title">${esc(s.site_title || 'ห้องเรียนออนไลน์')}</h1>
-        <p class="hero-sub">${esc(s.site_subtitle || '')}</p>
-      </section>`;
+    const c1 = hexToRgba(s.primary_color || '#4f8cff', .72);
+    const c2 = hexToRgba(s.accent_color || '#ff7eb6', .72);
+    heroStyle = `style="background-image:linear-gradient(135deg,${c1},${c2}),url('${esc(cover)}')"`;
   }
+  const heroHtml = `
+    <section class="hero hero-tech" ${heroStyle}>
+      ${techHeroLayer()}
+      <span class="hero-pill">📚 ห้องเรียนออนไลน์</span>
+      <h1 class="hero-title">${esc(s.site_title || 'ห้องเรียนออนไลน์')}</h1>
+      <p class="hero-sub">${esc(s.site_subtitle || '')}</p>
+    </section>`;
 
   // เลือกวิชาที่จะแสดง: นักเรียนเห็นเฉพาะ active / ครูเห็นทั้งหมด
   const subjects = state.subjects.filter(x => isTeacher() || (x.status || 'active') === 'active');
@@ -283,6 +279,42 @@ async function renderHome() {
     </div>
     ${cardsHtml}
   `;
+}
+
+// เลเยอร์เอฟเฟกต์เทคโนโลยีขยับได้ — เครือข่ายโหนดเรืองแสง + เส้นข้อมูลวิ่ง + แสงสแกน
+// วาดด้วย SVG ล้วน ขยับด้วย CSS/SMIL จึงไม่ต้องใช้ JS เพิ่ม และไม่ค้างหน่วยความจำตอนเปลี่ยนหน้า
+function techHeroLayer() {
+  // พิกัดโหนดบนผืน viewBox 1200x360
+  const nodes = [
+    [120, 70], [260, 140], [200, 260], [420, 90], [520, 210], [680, 120],
+    [820, 250], [960, 90], [1080, 200], [1140, 300], [380, 300], [760, 60]
+  ];
+  // คู่เส้นเชื่อมระหว่างโหนด (อ้างอิงลำดับใน nodes)
+  const links = [[0,1],[1,2],[1,3],[3,5],[4,5],[5,11],[5,6],[6,8],[7,8],[8,9],[4,10],[2,10],[7,11]];
+  const lines = links.map((p, i) => {
+    const a = nodes[p[0]], b = nodes[p[1]];
+    return `<line class="tn-link" style="--d:${(i % 5) * 0.6}s" x1="${a[0]}" y1="${a[1]}" x2="${b[0]}" y2="${b[1]}"/>`;
+  }).join('');
+  const dots = nodes.map((n, i) =>
+    `<circle class="tn-node" style="--d:${(i % 6) * 0.5}s" cx="${n[0]}" cy="${n[1]}" r="3.2"/>`
+  ).join('');
+  // แพ็กเก็ตข้อมูลวิ่งไปตามเส้นบางเส้น (ใช้ SMIL animate ที่เบราว์เซอร์รองรับ)
+  const packets = [[0,1],[5,6],[8,9],[3,5]].map((p, i) => {
+    const a = nodes[p[0]], b = nodes[p[1]], begin = (i * 0.9).toFixed(1);
+    return `<circle class="tn-packet" r="2.6" cx="${a[0]}" cy="${a[1]}">
+        <animate attributeName="cx" values="${a[0]};${b[0]}" dur="2.4s" begin="${begin}s" repeatCount="indefinite"/>
+        <animate attributeName="cy" values="${a[1]};${b[1]}" dur="2.4s" begin="${begin}s" repeatCount="indefinite"/>
+      </circle>`;
+  }).join('');
+  return `
+    <div class="tech-layer" aria-hidden="true">
+      <svg class="tech-net" viewBox="0 0 1200 360" preserveAspectRatio="xMidYMid slice">
+        <g class="tn-links">${lines}</g>
+        <g class="tn-packets">${packets}</g>
+        <g class="tn-nodes">${dots}</g>
+      </svg>
+      <span class="tech-scan"></span>
+    </div>`;
 }
 
 // การ์ดวิชา 1 ใบ
