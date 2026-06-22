@@ -8,7 +8,7 @@
    ★  สำคัญ: นำ "Web app URL" ที่ได้จากการ Deploy Code.gs (ลงท้าย /exec)        ★
    ★  มาวางแทนที่ค่าด้านล่างนี้                                                  ★
    ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★ */
-const API_URL = 'https://script.google.com/macros/s/AKfycbw6ZORvhiEVjmJVo_D9bfeg7ODd1R4s9wj9Z_ZDiIxgXQcjlf9smRkaqSJ6cdgOKnta/exec';
+const API_URL = 'https://script.google.com/macros/s/AKfycbzGmcCrs06fIBNyR1onhuLFmSRa9hDKq2CH-hxZV7sgGB2AJaTl2BFtOikES49oayOh/exec';
 
 
 /* ============================================================================
