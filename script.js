@@ -243,13 +243,25 @@ async function renderHome() {
   } catch (err) { app.innerHTML = viewError(err.message); return; }
 
   const s = state.settings;
-  // สร้าง hero — มีรูปปกใช้รูป ไม่มีก็ใช้ไล่เฉดสี
-  let heroStyle = '';
+  // สร้าง hero
+  //  - ถ้ามีรูปปก: โชว์รูปเต็มๆ สะอาด ไม่มีสีทาบ ไม่มีข้อความทับ ไม่ครอบตัดรูป
+  //    (เพราะรูปแบนเนอร์มักมีข้อความ/ดีไซน์ครบในตัวอยู่แล้ว)
+  //  - ถ้าไม่มีรูปปก: ใช้พื้นหลังไล่เฉดสี + ข้อความหัวเรื่องตามค่าตั้งค่า
   const cover = imgUrl(s.site_cover_image);
+  let heroHtml;
   if (cover) {
-    const c1 = hexToRgba(s.primary_color || '#4f8cff', .72);
-    const c2 = hexToRgba(s.accent_color || '#ff7eb6', .72);
-    heroStyle = `style="background-image:linear-gradient(135deg,${c1},${c2}),url('${esc(cover)}')"`;
+    heroHtml = `
+      <section class="hero hero-image">
+        <img class="hero-img" src="${esc(cover)}" alt="${esc(s.site_title || 'ห้องเรียนออนไลน์')}">
+      </section>`;
+  } else {
+    heroHtml = `
+      <section class="hero hero-gradient">
+        <span class="blob b1"></span><span class="blob b2"></span><span class="blob b3"></span>
+        <span class="hero-pill">📚 ห้องเรียนออนไลน์</span>
+        <h1 class="hero-title">${esc(s.site_title || 'ห้องเรียนออนไลน์')}</h1>
+        <p class="hero-sub">${esc(s.site_subtitle || '')}</p>
+      </section>`;
   }
 
   // เลือกวิชาที่จะแสดง: นักเรียนเห็นเฉพาะ active / ครูเห็นทั้งหมด
@@ -263,12 +275,7 @@ async function renderHome() {
   }
 
   app.innerHTML = `
-    <section class="hero" ${heroStyle}>
-      <span class="blob b1"></span><span class="blob b2"></span><span class="blob b3"></span>
-      <span class="hero-pill">📚 ห้องเรียนออนไลน์</span>
-      <h1 class="hero-title">${esc(s.site_title || 'ห้องเรียนออนไลน์')}</h1>
-      <p class="hero-sub">${esc(s.site_subtitle || '')}</p>
-    </section>
+    ${heroHtml}
 
     <div class="section-head">
       <h2>วิชาทั้งหมด <span class="count">(${subjects.length})</span></h2>
