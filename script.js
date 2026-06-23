@@ -93,6 +93,23 @@ function toDateInputValue(val) {
 
 const isTeacher = () => !!state.token;
 
+// ดึงรหัสวิดีโอจากลิงก์ YouTube หลายรูปแบบ แล้วคืน URL สำหรับฝัง (embed)
+// รองรับ: youtube.com/watch?v=ID, youtu.be/ID, /embed/ID, /shorts/ID, /live/ID
+// คืน null ถ้าไม่ใช่ลิงก์ YouTube (จะได้ fallback ไปเปิดแท็บใหม่แทน)
+function youtubeEmbedUrl(url) {
+  if (!url) return null;
+  const u = String(url).trim();
+  let id = '';
+  let m;
+  if ((m = u.match(/[?&]v=([A-Za-z0-9_-]{11})/))) id = m[1];
+  else if ((m = u.match(/youtu\.be\/([A-Za-z0-9_-]{11})/))) id = m[1];
+  else if ((m = u.match(/\/embed\/([A-Za-z0-9_-]{11})/))) id = m[1];
+  else if ((m = u.match(/\/shorts\/([A-Za-z0-9_-]{11})/))) id = m[1];
+  else if ((m = u.match(/\/live\/([A-Za-z0-9_-]{11})/))) id = m[1];
+  if (!id) return null;
+  return 'https://www.youtube.com/embed/' + id;
+}
+
 /* ============================================================================
    3) ติดต่อ API (Code.gs)
    - อ่านข้อมูลใช้ GET
@@ -598,6 +615,31 @@ async function renderLesson(lessonId) {
   const sub = state.subjects.find(x => x.id === lesson.subject_id) || {};
   const cover = imgUrl(lesson.cover_image);
   const link = lesson.link ? esc(lesson.link) : '';
+  const isVideo = (lesson.link_type || 'lesson') === 'video';
+  const embed = isVideo ? youtubeEmbedUrl(lesson.link) : null;
+
+  // ปุ่ม/วิดีโอ ตามชนิดเนื้อหา
+  //  - บทเรียนออนไลน์ -> ปุ่ม "เข้าเรียน" เปิดแท็บใหม่
+  //  - วิดีโอ YouTube  -> ฝังเล่นในหน้าเลย (ไม่ต้องเปิดแท็บใหม่)
+  //  - วิดีโออื่นที่ฝังไม่ได้ -> ปุ่ม "ดูวิดีโอ" เปิดแท็บใหม่
+  let actionHtml;
+  if (!link) {
+    actionHtml = `<span class="btn btn-outline" style="cursor:default">ยังไม่มีลิงก์บทเรียน</span>`;
+  } else if (isVideo && !embed) {
+    actionHtml = `<a class="btn btn-primary" href="${link}" target="_blank" rel="noopener">▶️ ดูวิดีโอ</a>`;
+  } else if (!isVideo) {
+    actionHtml = `<a class="btn btn-primary" href="${link}" target="_blank" rel="noopener">🚀 เข้าเรียนบทนี้</a>`;
+  } else {
+    actionHtml = '';   // เป็นวิดีโอฝังได้ -> ไม่ต้องมีปุ่ม (แสดงวิดีโอด้านล่างแทน)
+  }
+
+  // กล่องวิดีโอฝัง (ถ้าเป็น YouTube)
+  const videoHtml = embed ? `
+    <section class="video-embed">
+      <iframe src="${esc(embed)}" title="${esc(lesson.lesson_name)}" loading="lazy"
+        allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+        allowfullscreen referrerpolicy="strict-origin-when-cross-origin"></iframe>
+    </section>` : '';
 
   let worksHtml;
   if (!works.length) {
@@ -619,11 +661,13 @@ async function renderLesson(lessonId) {
         <h1>${esc(lesson.lesson_name)}</h1>
         <p>${esc(lesson.description || '')}</p>
         <div class="lesson-actions">
-          ${link ? `<a class="btn btn-primary" href="${link}" target="_blank" rel="noopener">🚀 เข้าเรียนบทนี้</a>` : `<span class="btn btn-outline" style="cursor:default">ยังไม่มีลิงก์บทเรียน</span>`}
+          ${actionHtml}
           <button class="btn btn-outline teacher-only" onclick="openLessonForm('${esc(lesson.id)}','${esc(lesson.subject_id)}')">✏️ แก้ไขบทเรียน</button>
         </div>
       </div>
     </section>
+
+    ${videoHtml}
 
     <div class="section-head">
       <h2>🎨 ผลงานนักเรียน <span class="count">(${works.length})</span></h2>
@@ -898,7 +942,14 @@ function openLessonForm(id, subjectId) {
       <div class="field"><label>วิชาที่สังกัด <span class="req">*</span></label><select name="subject_id">${subjectOptions}</select></div>
       <div class="field"><label>ชื่อบทเรียน <span class="req">*</span></label><input name="lesson_name" value="${esc(lesson.lesson_name || '')}" placeholder="เช่น เศษส่วน" /><div class="err">กรุณากรอกชื่อบทเรียน</div></div>
       <div class="field"><label>คำอธิบาย</label><textarea name="description" placeholder="อธิบายสั้นๆ ว่าบทเรียนนี้เกี่ยวกับอะไร">${esc(lesson.description || '')}</textarea></div>
-      <div class="field"><label>ลิงก์เข้าเรียน <span class="req">*</span></label><input name="link" value="${esc(lesson.link || '')}" placeholder="https://..." /><div class="err">กรุณากรอกลิงก์ (ขึ้นต้นด้วย http)</div></div>
+      <div class="field">
+        <label>ชนิดเนื้อหา</label>
+        <select name="link_type" id="lf_type">
+          <option value="lesson" ${(lesson.link_type||'lesson')==='lesson'?'selected':''}>บทเรียนออนไลน์ (กดแล้วเปิดแท็บใหม่)</option>
+          <option value="video" ${lesson.link_type==='video'?'selected':''}>วิดีโอ YouTube (ฝังให้ดูในหน้านี้)</option>
+        </select>
+      </div>
+      <div class="field"><label id="lf_link_label">ลิงก์เข้าเรียน <span class="req">*</span></label><input name="link" id="lf_link" value="${esc(lesson.link || '')}" placeholder="https://..." /><div class="err">กรุณากรอกลิงก์ (ขึ้นต้นด้วย http)</div><div class="hint" id="lf_link_hint"></div></div>
       ${imageField('cover_image', 'รูปปกบทเรียน', lesson.cover_image)}
       <div class="row2">
         <div class="field"><label>ลำดับการแสดง</label><input type="number" name="order" value="${esc(lesson.order || 1)}" /></div>
@@ -911,6 +962,26 @@ function openLessonForm(id, subjectId) {
     </form>
   `);
   wireImageField('cover_image', $('#modalBody'));
+  // ปรับป้ายช่องลิงก์ตามชนิดเนื้อหา + เตือนถ้าวิดีโอไม่ใช่ลิงก์ YouTube
+  const typeSel = $('#lf_type'), linkLabel = $('#lf_link_label'), linkInput = $('#lf_link'), linkHint = $('#lf_link_hint');
+  function syncLinkUI() {
+    const v = typeSel.value;
+    if (v === 'video') {
+      linkLabel.innerHTML = 'ลิงก์วิดีโอ YouTube <span class="req">*</span>';
+      linkInput.placeholder = 'เช่น https://youtu.be/xxxx หรือ https://www.youtube.com/watch?v=xxxx';
+      const ok = !linkInput.value.trim() || !!youtubeEmbedUrl(linkInput.value);
+      linkHint.textContent = ok ? 'ลิงก์ YouTube จะฝังเล่นในหน้าบทเรียนให้นักเรียนดูได้เลย' : '⚠️ ไม่ใช่ลิงก์ YouTube ที่ฝังได้ ระบบจะแสดงเป็นปุ่ม "ดูวิดีโอ" เปิดแท็บใหม่แทน';
+      linkHint.style.color = ok ? 'var(--ink-soft)' : '#d97706';
+    } else {
+      linkLabel.innerHTML = 'ลิงก์เข้าเรียน <span class="req">*</span>';
+      linkInput.placeholder = 'https://...';
+      linkHint.textContent = 'กดปุ่ม "เข้าเรียน" แล้วจะเปิดลิงก์นี้ในแท็บใหม่';
+      linkHint.style.color = 'var(--ink-soft)';
+    }
+  }
+  typeSel.addEventListener('change', syncLinkUI);
+  linkInput.addEventListener('input', syncLinkUI);
+  syncLinkUI();
   $('#lessonForm').addEventListener('submit', async (e) => {
     e.preventDefault();
     const f = e.target;
@@ -923,6 +994,7 @@ function openLessonForm(id, subjectId) {
     const item = {
       id: lesson.id || '', subject_id: f.elements.subject_id.value,
       lesson_name: name, description: f.elements.description.value.trim(), link,
+      link_type: f.elements.link_type.value,
       cover_image: f.elements.cover_image.value.trim(),
       order: Number(f.elements.order.value) || 0, status: f.elements.status.value
     };
