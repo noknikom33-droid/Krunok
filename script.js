@@ -32,6 +32,11 @@ const state = {
 const $  = (sel) => document.querySelector(sel);
 const app = $('#app');
 
+// --- ตัวเชื่อมกับ "หน้าจอกำลังโหลด" ใน index.html (window.AppLoader) ---
+// เรียกได้อย่างปลอดภัย แม้หน้าจอโหลดจะปิดไปแล้ว (จะกลายเป็นไม่ทำอะไร)
+function loaderSet(p)  { try { if (window.AppLoader && window.AppLoader.set)    window.AppLoader.set(p); } catch (e) {} }
+function loaderDone()  { try { if (window.AppLoader && window.AppLoader.finish) window.AppLoader.finish(); } catch (e) {} }
+
 // ป้องกันโค้ดอันตรายจากข้อความ (escape) ก่อนเอาไปแสดง
 function esc(s) {
   return String(s == null ? '' : s)
@@ -176,6 +181,10 @@ function applyTheme() {
   $('#brandName').textContent = s.site_title || 'ห้องเรียนออนไลน์';
   document.title = s.site_title || 'ห้องเรียนออนไลน์';
   $('#footerText').textContent = s.footer_text || '';
+
+  // อัปเดตชื่อบนหน้าจอกำลังโหลด (ถ้ายังเปิดอยู่) ให้ตรงกับชื่อเว็บจริง
+  const ldb = document.getElementById('ldBrand');
+  if (ldb && s.site_title) ldb.textContent = s.site_title;
 }
 
 /* ============================================================================
@@ -289,10 +298,12 @@ async function loadCore(force) {
    10) หน้าแรก — Hero + ตารางวิชา
    ============================================================================ */
 async function renderHome() {
+  loaderSet(12);                     // แจ้งหน้าจอโหลด: เริ่มโหลดแล้ว
   app.innerHTML = viewSkeleton();
   try {
     await loadCore(true);
-  } catch (err) { app.innerHTML = viewError(err.message); return; }
+    loaderSet(58);                   // โหลดข้อมูลหลัก (วิชา + ตั้งค่า) เสร็จ
+  } catch (err) { app.innerHTML = viewError(err.message); loaderDone(); return; }
 
   // โหลดข้อมูลเสริม: ประชาสัมพันธ์ + สถิติ + ผลงานล่าสุด
   // ใช้ allSettled เพื่อว่า ถ้าส่วนใดโหลดไม่ได้ (เช่นยังไม่ได้ deploy Code.gs ใหม่)
@@ -301,6 +312,7 @@ async function renderHome() {
     apiGet('getAnnouncements'),
     apiGet('getHome')
   ]);
+  loaderSet(90);                     // โหลดข้อมูลเสริมเสร็จ
   state.announcements = (annRes.status === 'fulfilled' && Array.isArray(annRes.value)) ? annRes.value : [];
   const home = (homeRes.status === 'fulfilled') ? homeRes.value : null;
   state.stats = (home && home.stats) ? home.stats : null;
@@ -310,8 +322,9 @@ async function renderHome() {
   // รูปปกหน้าแรก: รองรับได้ถึง 3 รูป (สลับอัตโนมัติ) เก็บใน settings 3 คีย์
   const covers = [s.site_cover_image, s.site_cover_image2, s.site_cover_image3]
     .map(imgUrl).filter(Boolean);
-  const c1 = hexToRgba(s.primary_color || '#4f8cff', .72);
-  const c2 = hexToRgba(s.accent_color || '#ff7eb6', .72);
+  // เฉดสีทาบบนรูป (โปร่งแสง) — ใช้ค่ากลางให้เห็นรูปชัดขึ้น แต่ตัวอักษรยังอ่านง่าย
+  const c1 = hexToRgba(s.primary_color || '#4f8cff', .55);
+  const c2 = hexToRgba(s.accent_color || '#ff7eb6', .55);
   // ชั้นรูปภาพ (แต่ละรูปมีเฉดสีทาบในตัว) — ถ้าไม่มีรูปเลย จะใช้พื้นไล่เฉดสีจาก CSS
   const slidesHtml = covers.length
     ? `<div class="hero-slides">${covers.map((url, i) =>
@@ -345,6 +358,7 @@ async function renderHome() {
     cardsHtml = `<div class="grid">${subjects.map((sub, i) => subjectCard(sub, i)).join('')}</div>`;
   }
 
+  loaderSet(97);                     // กำลังจะวาดหน้าแล้ว
   app.innerHTML = `
     ${heroHtml}
     ${statsBar()}
@@ -360,7 +374,8 @@ async function renderHome() {
     ${aboutSection()}
   `;
 
-  animateStats();   // ทำเลขสถิติวิ่งขึ้น
+  loaderDone();          // โหลดเสร็จสมบูรณ์ -> หน้าจอโหลดวิ่งไป 100% แล้วเฟดหาย
+  animateStats();        // ทำเลขสถิติวิ่งขึ้น
   startHeroRotation();   // เริ่มสลับรูปปกอัตโนมัติ (ถ้ามีหลายรูป)
 }
 
@@ -370,6 +385,11 @@ function startHeroRotation() {
   const slides = Array.from(app.querySelectorAll('.hero-slide'));
   const dots = Array.from(app.querySelectorAll('.hero-dot'));
   if (slides.length < 2) return;   // มีรูปเดียว/ไม่มี = ไม่ต้องสลับ
+
+  // อ่าน "เวลาสลับรูป" (วินาที) จากการตั้งค่า — จำกัด 2–60 วิ ค่าเริ่มต้น 5 วิ
+  const sec = Number(state.settings.cover_interval);
+  const ms = (isFinite(sec) && sec > 0 ? Math.max(2, Math.min(60, sec)) : 5) * 1000;
+
   let idx = 0;
   const show = (n) => {
     idx = (n + slides.length) % slides.length;
@@ -382,7 +402,7 @@ function startHeroRotation() {
       // หยุดเองถ้า hero หลุดออกจากหน้าจอแล้ว (เปลี่ยนหน้า)
       if (!document.body.contains(slides[0])) { clearInterval(state._heroTimer); state._heroTimer = null; return; }
       show(idx + 1);
-    }, 5000);
+    }, ms);
   };
   dots.forEach((d) => d.addEventListener('click', () => { show(Number(d.dataset.i)); restart(); }));
   restart();
@@ -576,15 +596,17 @@ function goSubject(id) { location.hash = 'subject=' + id; }
    11) หน้าวิชา — แสดงบทเรียนของวิชานั้น
    ============================================================================ */
 async function renderSubject(subjectId) {
+  loaderSet(20);
   app.innerHTML = viewSkeleton();
   try {
     await loadCore();
+    loaderSet(65);
     const lessons = await apiGet('getLessons', { subject_id: subjectId });
     state.lessonsCache[subjectId] = (lessons || []).sort(byOrder);
-  } catch (err) { app.innerHTML = viewError(err.message); return; }
+  } catch (err) { app.innerHTML = viewError(err.message); loaderDone(); return; }
 
   const sub = state.subjects.find(x => x.id === subjectId);
-  if (!sub) { app.innerHTML = viewEmpty('🔍', 'ไม่พบวิชานี้', 'อาจถูกลบไปแล้ว'); return; }
+  if (!sub) { app.innerHTML = viewEmpty('🔍', 'ไม่พบวิชานี้', 'อาจถูกลบไปแล้ว'); loaderDone(); return; }
 
   const lessons = state.lessonsCache[subjectId].filter(x => isTeacher() || (x.status || 'active') === 'active');
 
@@ -603,6 +625,7 @@ async function renderSubject(subjectId) {
     </div>
     ${cardsHtml}
   `;
+  loaderDone();
 }
 
 // การ์ดบทเรียน 1 ใบ
@@ -631,10 +654,12 @@ function goLesson(id) { location.hash = 'lesson=' + id; }
    12) หน้าบทเรียน — รายละเอียด + ปุ่มเข้าเรียน + ผลงานนักเรียน
    ============================================================================ */
 async function renderLesson(lessonId) {
+  loaderSet(20);
   app.innerHTML = viewSkeleton();
   let lesson, works;
   try {
     await loadCore();
+    loaderSet(50);
     // หาบทเรียน: ลองจาก cache ก่อน ไม่มีค่อยโหลดทุกวิชา
     lesson = findLessonInCache(lessonId);
     if (!lesson) {
@@ -645,10 +670,11 @@ async function renderLesson(lessonId) {
       }
       lesson = findLessonInCache(lessonId);
     }
-    if (!lesson) { app.innerHTML = viewEmpty('🔍', 'ไม่พบบทเรียนนี้', 'อาจถูกลบไปแล้ว'); return; }
+    if (!lesson) { app.innerHTML = viewEmpty('🔍', 'ไม่พบบทเรียนนี้', 'อาจถูกลบไปแล้ว'); loaderDone(); return; }
+    loaderSet(80);
     works = await apiGet('getWorks', { lesson_id: lessonId });
     state.worksCache[lessonId] = works || [];
-  } catch (err) { app.innerHTML = viewError(err.message); return; }
+  } catch (err) { app.innerHTML = viewError(err.message); loaderDone(); return; }
 
   const sub = state.subjects.find(x => x.id === lesson.subject_id) || {};
   const cover = imgUrl(lesson.cover_image);
@@ -713,6 +739,7 @@ async function renderLesson(lessonId) {
     </div>
     ${worksHtml}
   `;
+  loaderDone();
 }
 
 function findLessonInCache(lessonId) {
@@ -751,8 +778,9 @@ function workCard(w, i) {
    ============================================================================ */
 async function renderSettings() {
   if (!isTeacher()) { toast('กรุณาเข้าสู่ระบบครูก่อน', 'error'); location.hash = ''; return; }
+  loaderSet(30);
   app.innerHTML = viewSkeleton();
-  try { await loadCore(true); } catch (err) { app.innerHTML = viewError(err.message); return; }
+  try { await loadCore(true); } catch (err) { app.innerHTML = viewError(err.message); loaderDone(); return; }
 
   const s = state.settings;
   app.innerHTML = `
@@ -772,6 +800,11 @@ async function renderSettings() {
         ${imageField('site_cover_image', 'รูปปกเว็บหลัก (รูปที่ 1)', s.site_cover_image)}
         ${imageField('site_cover_image2', 'รูปปกเว็บ (รูปที่ 2) — ใส่เพิ่มเพื่อให้สลับอัตโนมัติ', s.site_cover_image2)}
         ${imageField('site_cover_image3', 'รูปปกเว็บ (รูปที่ 3)', s.site_cover_image3)}
+        <div class="field">
+          <label>สลับรูปปกอัตโนมัติทุกกี่วินาที</label>
+          <input type="number" name="cover_interval" min="2" max="60" step="1" value="${esc(s.cover_interval || 5)}" />
+          <div class="hint">มีผลเมื่อใส่รูปปกมากกว่า 1 รูป — แนะนำ 4–7 วินาที (ต่ำสุด 2, สูงสุด 60)</div>
+        </div>
         <div class="row2">
           <div class="field">
             <label>สีหลัก</label>
@@ -812,6 +845,7 @@ async function renderSettings() {
       </form>
     </div>
   `;
+  loaderDone();
 
   wireImageField('site_cover_image');
   wireImageField('site_cover_image2');
@@ -836,6 +870,7 @@ async function renderSettings() {
       site_cover_image: f.elements.site_cover_image.value.trim(),
       site_cover_image2: f.elements.site_cover_image2.value.trim(),
       site_cover_image3: f.elements.site_cover_image3.value.trim(),
+      cover_interval: Math.max(2, Math.min(60, Number(f.elements.cover_interval.value) || 5)),
       primary_color: f.elements.primary_color.value,
       accent_color: f.elements.accent_color.value,
       footer_text: f.elements.footer_text.value.trim(),
