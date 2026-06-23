@@ -307,20 +307,33 @@ async function renderHome() {
   state.recentWorks = (home && Array.isArray(home.recentWorks)) ? home.recentWorks : [];
 
   const s = state.settings;
-  // สร้าง hero — รูปเป็นพื้นหลัง + เฉดสีโปร่งแสงทาบ + ข้อความหัวเรื่องทับ + เลเยอร์เทคโนโลยีขยับได้
-  const cover = imgUrl(s.site_cover_image);
-  let heroStyle = '';
-  if (cover) {
-    const c1 = hexToRgba(s.primary_color || '#4f8cff', .72);
-    const c2 = hexToRgba(s.accent_color || '#ff7eb6', .72);
-    heroStyle = `style="background-image:linear-gradient(135deg,${c1},${c2}),url('${esc(cover)}')"`;
-  }
+  // รูปปกหน้าแรก: รองรับได้ถึง 3 รูป (สลับอัตโนมัติ) เก็บใน settings 3 คีย์
+  const covers = [s.site_cover_image, s.site_cover_image2, s.site_cover_image3]
+    .map(imgUrl).filter(Boolean);
+  const c1 = hexToRgba(s.primary_color || '#4f8cff', .72);
+  const c2 = hexToRgba(s.accent_color || '#ff7eb6', .72);
+  // ชั้นรูปภาพ (แต่ละรูปมีเฉดสีทาบในตัว) — ถ้าไม่มีรูปเลย จะใช้พื้นไล่เฉดสีจาก CSS
+  const slidesHtml = covers.length
+    ? `<div class="hero-slides">${covers.map((url, i) =>
+        `<div class="hero-slide ${i === 0 ? 'active' : ''}" style="background-image:linear-gradient(135deg,${c1},${c2}),url('${esc(url)}')"></div>`
+      ).join('')}</div>`
+    : '';
+  // จุดบอกตำแหน่ง (แสดงเมื่อมีรูปมากกว่า 1)
+  const dotsHtml = covers.length > 1
+    ? `<div class="hero-dots">${covers.map((_, i) =>
+        `<span class="hero-dot ${i === 0 ? 'active' : ''}" data-i="${i}" role="button" aria-label="รูปที่ ${i + 1}"></span>`
+      ).join('')}</div>`
+    : '';
   const heroHtml = `
-    <section class="hero hero-tech" ${heroStyle}>
+    <section class="hero hero-tech">
+      ${slidesHtml}
       ${techHeroLayer()}
-      <span class="hero-pill">📚 ห้องเรียนออนไลน์</span>
-      <h1 class="hero-title">${esc(s.site_title || 'ห้องเรียนออนไลน์')}</h1>
-      <p class="hero-sub">${esc(s.site_subtitle || '')}</p>
+      <div class="hero-inner">
+        <span class="hero-pill">📚 ห้องเรียนออนไลน์</span>
+        <h1 class="hero-title">${esc(s.site_title || 'ห้องเรียนออนไลน์')}</h1>
+        <p class="hero-sub">${esc(s.site_subtitle || '')}</p>
+      </div>
+      ${dotsHtml}
     </section>`;
 
   // เลือกวิชาที่จะแสดง: นักเรียนเห็นเฉพาะ active / ครูเห็นทั้งหมด
@@ -348,6 +361,31 @@ async function renderHome() {
   `;
 
   animateStats();   // ทำเลขสถิติวิ่งขึ้น
+  startHeroRotation();   // เริ่มสลับรูปปกอัตโนมัติ (ถ้ามีหลายรูป)
+}
+
+/* ---- สลับรูปปก hero อัตโนมัติ ---- */
+function startHeroRotation() {
+  if (state._heroTimer) { clearInterval(state._heroTimer); state._heroTimer = null; }
+  const slides = Array.from(app.querySelectorAll('.hero-slide'));
+  const dots = Array.from(app.querySelectorAll('.hero-dot'));
+  if (slides.length < 2) return;   // มีรูปเดียว/ไม่มี = ไม่ต้องสลับ
+  let idx = 0;
+  const show = (n) => {
+    idx = (n + slides.length) % slides.length;
+    slides.forEach((el, i) => el.classList.toggle('active', i === idx));
+    dots.forEach((el, i) => el.classList.toggle('active', i === idx));
+  };
+  const restart = () => {
+    clearInterval(state._heroTimer);
+    state._heroTimer = setInterval(() => {
+      // หยุดเองถ้า hero หลุดออกจากหน้าจอแล้ว (เปลี่ยนหน้า)
+      if (!document.body.contains(slides[0])) { clearInterval(state._heroTimer); state._heroTimer = null; return; }
+      show(idx + 1);
+    }, 5000);
+  };
+  dots.forEach((d) => d.addEventListener('click', () => { show(Number(d.dataset.i)); restart(); }));
+  restart();
 }
 
 /* ---- แถบสถิติสรุป (จำนวนวิชา / บทเรียน / ผลงาน) ---- */
@@ -731,7 +769,9 @@ async function renderSettings() {
           <label>คำโปรย (ข้อความต้อนรับใต้ชื่อ)</label>
           <textarea name="site_subtitle" placeholder="เช่น ยินดีต้อนรับสู่ห้องเรียนออนไลน์">${esc(s.site_subtitle || '')}</textarea>
         </div>
-        ${imageField('site_cover_image', 'รูปปกเว็บหลัก (Hero banner)', s.site_cover_image)}
+        ${imageField('site_cover_image', 'รูปปกเว็บหลัก (รูปที่ 1)', s.site_cover_image)}
+        ${imageField('site_cover_image2', 'รูปปกเว็บ (รูปที่ 2) — ใส่เพิ่มเพื่อให้สลับอัตโนมัติ', s.site_cover_image2)}
+        ${imageField('site_cover_image3', 'รูปปกเว็บ (รูปที่ 3)', s.site_cover_image3)}
         <div class="row2">
           <div class="field">
             <label>สีหลัก</label>
@@ -774,6 +814,8 @@ async function renderSettings() {
   `;
 
   wireImageField('site_cover_image');
+  wireImageField('site_cover_image2');
+  wireImageField('site_cover_image3');
   wireImageField('about_photo');
   ['primary_color', 'accent_color'].forEach(name => {
     const c = app.querySelector(`[name=${name}]`), t = app.querySelector(`[name=${name}_text]`);
@@ -792,6 +834,8 @@ async function renderSettings() {
       site_title: title,
       site_subtitle: f.elements.site_subtitle.value.trim(),
       site_cover_image: f.elements.site_cover_image.value.trim(),
+      site_cover_image2: f.elements.site_cover_image2.value.trim(),
+      site_cover_image3: f.elements.site_cover_image3.value.trim(),
       primary_color: f.elements.primary_color.value,
       accent_color: f.elements.accent_color.value,
       footer_text: f.elements.footer_text.value.trim(),
