@@ -4,6 +4,13 @@
   ไฟล์นี้คือ "โครงหน้าเว็บ" หลัก ใช้ระบบหน้าเดียว (SPA)
   เนื้อหาทั้งหมดถูกสร้างด้วย JavaScript ในไฟล์ script.js
   คุณครูไม่ต้องแก้ไฟล์นี้ ยกเว้นอยากเปลี่ยนข้อความเริ่มต้นเล็กน้อย
+
+  ★ ของใหม่ในไฟล์นี้: "หน้าจอกำลังโหลด" (Preloader)
+    - แสดงสปินเนอร์วงกลมพร้อมเปอร์เซ็นต์ทันทีที่เปิดเว็บ
+    - ตกแต่งสดใส มีไอคอนลอย + แสงเรืองรอง ให้เด็ก ๆ ชอบ
+    - ปิดตัวเองอัตโนมัติเมื่อหน้าเว็บโหลดข้อมูลเสร็จ (ตรวจจับเอง)
+    - script.js เวอร์ชันใหม่จะสั่งให้เปอร์เซ็นต์ "จริง" ขึ้นตามขั้นโหลดได้ผ่าน
+      window.AppLoader.set(เปอร์เซ็นต์)  และปิดด้วย window.AppLoader.finish()
 -->
 <html lang="th">
 <head>
@@ -17,11 +24,231 @@
   <link href="https://fonts.googleapis.com/css2?family=Kanit:wght@500;600;700&family=Sarabun:wght@400;500;600&display=swap" rel="stylesheet" />
 
   <!-- ไฟล์สไตล์ของเรา -->
-  <link rel="stylesheet" href="style.css?v=9" />
+  <link rel="stylesheet" href="style.css?v=10" />
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📚</text></svg>" />
+
+  <!-- ===================== สไตล์ของหน้าจอโหลด (ฝังในไฟล์ เพื่อให้แสดงทันที) ===================== -->
+  <style>
+    /* กันสกอร์ลตอนหน้าจอโหลดยังเปิดอยู่ */
+    html.is-loading, html.is-loading body { overflow: hidden; }
+
+    /* กล่องคลุมเต็มจอ */
+    #appLoader {
+      position: fixed; inset: 0; z-index: 99999;
+      display: flex; flex-direction: column; align-items: center; justify-content: center;
+      gap: 26px; padding: 24px; text-align: center;
+      font-family: 'Kanit', 'Sarabun', sans-serif; color: #1f2a44;
+      background:
+        radial-gradient(1100px 620px at 50% -8%, #eaf1ff, transparent 70%),
+        radial-gradient(820px 560px at 108% 112%, #ffe6f1, transparent 70%),
+        radial-gradient(700px 500px at -8% 100%, #e7fbf3, transparent 70%),
+        #f5f8ff;
+      transition: opacity .6s ease, visibility .6s ease;
+    }
+    #appLoader.is-hide { opacity: 0; visibility: hidden; pointer-events: none; }
+
+    /* วงแหวนหลัก + พื้นที่ตรงกลาง */
+    .ld-ring { position: relative; width: 188px; height: 188px; }
+    .ld-svg { width: 100%; height: 100%; display: block; transform: rotate(-90deg); }
+
+    /* รางวงกลม (สีจาง) */
+    .ld-track { fill: none; stroke: #e4ebfb; stroke-width: 9; }
+    /* แถบความคืบหน้า (ไล่เฉดสี + ปลายมน + เรืองแสง) */
+    .ld-bar {
+      fill: none; stroke: url(#ldGrad); stroke-width: 9; stroke-linecap: round;
+      filter: drop-shadow(0 0 7px rgba(120,140,255,.55));
+    }
+    /* จุดหัวแถบที่เรืองแสง วิ่งไปตามวง */
+    .ld-tip { fill: #ffffff; filter: drop-shadow(0 0 8px rgba(255,255,255,.95)); }
+
+    /* วงประหมุน ๆ ตกแต่งด้านนอก */
+    .ld-orbit { fill: none; stroke: rgba(120,140,255,.30); stroke-width: 2; stroke-dasharray: 3 12; stroke-linecap: round; transform-origin: 50% 50%; animation: ld-spin 9s linear infinite; }
+    @keyframes ld-spin { to { transform: rotate(360deg); } }
+
+    /* แสงนวลเต้นอยู่หลังวงแหวน */
+    .ld-ring::before {
+      content: ""; position: absolute; inset: 14px; border-radius: 50%;
+      background: radial-gradient(circle, rgba(120,140,255,.18), transparent 68%);
+      animation: ld-glow 2.4s ease-in-out infinite;
+    }
+    @keyframes ld-glow { 0%,100% { transform: scale(.92); opacity: .6; } 50% { transform: scale(1.06); opacity: 1; } }
+
+    /* ตัวเลขเปอร์เซ็นต์ + อีโมจิ ตรงกลางวง */
+    .ld-center { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; }
+    .ld-pct { font-weight: 700; font-size: 2.7rem; line-height: 1; color: #2e4a7d; letter-spacing: -1px; }
+    .ld-pct i { font-style: normal; font-size: 1.2rem; font-weight: 600; color: #7c8db3; margin-left: 2px; }
+    .ld-emoji { font-size: 1.5rem; animation: ld-bob 1.4s ease-in-out infinite; }
+    @keyframes ld-bob { 0%,100% { transform: translateY(0) scale(1); } 50% { transform: translateY(-4px) scale(1.12); } }
+
+    /* ป้ายชื่อเว็บเล็ก ๆ + ข้อความสถานะ */
+    .ld-brand { display: inline-flex; align-items: center; gap: 8px; font-weight: 700; font-size: 1.15rem; color: #2e4a7d; }
+    .ld-brand .b-logo { font-size: 1.5rem; animation: ld-bob 1.8s ease-in-out infinite; }
+    .ld-msg { font-family: 'Sarabun', sans-serif; font-weight: 600; font-size: 1rem; color: #5b6b8c; min-height: 1.4em; transition: opacity .3s; }
+
+    /* แถบรางคืบหน้าบาง ๆ ใต้ข้อความ (เสริมให้รู้สึกว่าโหลดอยู่) */
+    .ld-track-bar { width: min(280px, 78vw); height: 6px; border-radius: 999px; background: #e4ebfb; overflow: hidden; }
+    .ld-track-fill { height: 100%; width: 0%; border-radius: 999px; background: linear-gradient(90deg, #4f8cff, #ff7eb6); transition: width .25s ease; }
+
+    /* ไอคอนลอยรอบ ๆ จอ (ตกแต่งให้สนุก) */
+    .ld-float { position: absolute; inset: 0; overflow: hidden; pointer-events: none; }
+    .ld-float span { position: absolute; font-size: 1.8rem; opacity: .55; animation: ld-drift 7s ease-in-out infinite; }
+    .ld-float span:nth-child(1) { top: 16%;  left: 12%; animation-delay: 0s;   }
+    .ld-float span:nth-child(2) { top: 24%;  right: 14%; animation-delay: .8s; font-size: 2.1rem; }
+    .ld-float span:nth-child(3) { bottom: 20%; left: 18%; animation-delay: 1.6s; }
+    .ld-float span:nth-child(4) { bottom: 16%; right: 16%; animation-delay: 2.4s; font-size: 2.2rem; }
+    .ld-float span:nth-child(5) { top: 46%;  left: 6%;  animation-delay: 3.2s; }
+    .ld-float span:nth-child(6) { top: 52%;  right: 7%; animation-delay: 4s;   }
+    @keyframes ld-drift { 0%,100% { transform: translateY(0) rotate(-4deg); } 50% { transform: translateY(-18px) rotate(6deg); } }
+
+    /* เคารพการตั้งค่า "ลดการเคลื่อนไหว" */
+    @media (prefers-reduced-motion: reduce) {
+      #appLoader *, #appLoader *::before { animation: none !important; }
+    }
+    @media (max-width: 480px) {
+      .ld-ring { width: 158px; height: 158px; }
+      .ld-pct { font-size: 2.3rem; }
+    }
+  </style>
 </head>
 
 <body>
+
+  <!-- ===================== หน้าจอกำลังโหลด (Preloader) ===================== -->
+  <div id="appLoader" role="status" aria-live="polite" aria-label="กำลังโหลดห้องเรียนออนไลน์">
+    <!-- ไอคอนลอยตกแต่ง -->
+    <div class="ld-float" aria-hidden="true">
+      <span>📚</span><span>✏️</span><span>🎨</span><span>🔢</span><span>🌟</span><span>📐</span>
+    </div>
+
+    <!-- วงแหวนความคืบหน้า -->
+    <div class="ld-ring">
+      <svg class="ld-svg" viewBox="0 0 120 120" aria-hidden="true">
+        <defs>
+          <linearGradient id="ldGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+            <stop offset="0%"  stop-color="#4f8cff" />
+            <stop offset="55%" stop-color="#7a7bff" />
+            <stop offset="100%" stop-color="#ff7eb6" />
+          </linearGradient>
+        </defs>
+        <circle class="ld-orbit" cx="60" cy="60" r="57" />
+        <circle class="ld-track" cx="60" cy="60" r="52" />
+        <circle class="ld-bar"   cx="60" cy="60" r="52" id="ldBar" />
+        <circle class="ld-tip"   cx="60" cy="8"  r="4.5" id="ldTip" />
+      </svg>
+      <div class="ld-center">
+        <div class="ld-pct"><span id="ldPct">0</span><i>%</i></div>
+        <div class="ld-emoji" id="ldEmoji">📚</div>
+      </div>
+    </div>
+
+    <!-- ข้อความ -->
+    <div>
+      <div class="ld-brand"><span class="b-logo">📚</span><span id="ldBrand">ห้องเรียนออนไลน์</span></div>
+      <div class="ld-msg" id="ldMsg">กำลังเปิดห้องเรียน…</div>
+    </div>
+
+    <!-- แถบรางบาง ๆ -->
+    <div class="ld-track-bar" aria-hidden="true"><div class="ld-track-fill" id="ldFill"></div></div>
+  </div>
+
+  <!-- ตัวควบคุมหน้าจอโหลด (ต้องอยู่ก่อน script.js เพื่อให้มี window.AppLoader พร้อมใช้) -->
+  <script>
+  (function () {
+    var R = 52;                       // รัศมีวง (ตรงกับ r ใน SVG)
+    var C = 2 * Math.PI * R;          // เส้นรอบวง
+    var overlay = document.getElementById('appLoader');
+    var bar   = document.getElementById('ldBar');
+    var tip   = document.getElementById('ldTip');
+    var pctEl = document.getElementById('ldPct');
+    var fill  = document.getElementById('ldFill');
+    var msgEl = document.getElementById('ldMsg');
+    var emojiEl = document.getElementById('ldEmoji');
+    document.documentElement.classList.add('is-loading');
+
+    // ตั้งค่าเริ่มต้นของแถบวงกลม (เริ่มที่ 0%)
+    bar.style.strokeDasharray = C;
+    bar.style.strokeDashoffset = C;
+
+    var shown = 0, target = 0, finished = false, closed = false, raf;
+
+    // ข้อความ + อีโมจิ สลับไปเรื่อย ๆ ให้ดูมีชีวิต
+    var msgs = ['กำลังเปิดห้องเรียน…', 'จัดเตรียมบทเรียน…', 'ตกแต่งห้องเรียน…', 'เกือบพร้อมแล้ว…'];
+    var emojis = ['📚', '✏️', '🎨', '🔢', '🌟', '🧮', '📖'];
+    var mi = 0, ei = 0;
+    var cycle = setInterval(function () {
+      mi = (mi + 1) % msgs.length;   if (msgEl) msgEl.textContent = msgs[mi];
+      ei = (ei + 1) % emojis.length; if (emojiEl) emojiEl.textContent = emojis[ei];
+    }, 1200);
+
+    // วาดทุกเฟรม: ค่อย ๆ ขยับเลขที่แสดงเข้าหาเป้าหมาย (นุ่มนวล)
+    function render() {
+      shown += (target - shown) * 0.12;
+      if (finished && (target - shown) < 0.4) shown = target;
+      var p = Math.max(0, Math.min(100, shown));
+
+      bar.style.strokeDashoffset = C * (1 - p / 100);
+      if (pctEl) pctEl.textContent = Math.round(p);
+      if (fill)  fill.style.width = p + '%';
+
+      // เลื่อนจุดหัวแถบไปตามวง (เริ่มที่ด้านบน = -90°)
+      var ang = (p / 100) * 2 * Math.PI - Math.PI / 2;
+      tip.setAttribute('cx', (60 + R * Math.cos(ang)).toFixed(2));
+      tip.setAttribute('cy', (60 + R * Math.sin(ang)).toFixed(2));
+      tip.style.opacity = p > 0.5 ? '1' : '0';
+
+      if (finished && p >= 99.6) { closeLoader(); return; }
+      raf = requestAnimationFrame(render);
+    }
+    raf = requestAnimationFrame(render);
+
+    // ไต่ขึ้นเองช้า ๆ ถึง ~90% (กันค้างให้ดูเหมือนกำลังทำงาน)
+    var creep = setInterval(function () {
+      if (finished) return;
+      if (target < 90) { target += (90 - target) * 0.06 + 0.5; if (target > 90) target = 90; }
+    }, 200);
+
+    // เปิดให้ script.js ตั้งเปอร์เซ็นต์จริง และสั่งปิดได้
+    function setProgress(p) {
+      if (finished) return;
+      p = Number(p) || 0;
+      if (p > target) target = Math.min(p, 99);   // ยังไม่ให้แตะ 100 จนกว่าจะ finish
+    }
+    function finish() {
+      if (finished) return;
+      finished = true; target = 100;
+      clearInterval(creep); clearInterval(cycle);
+      if (msgEl) msgEl.textContent = 'พร้อมแล้ว! 🎉';
+      if (emojiEl) emojiEl.textContent = '🎉';
+    }
+    function closeLoader() {
+      if (closed) return; closed = true;
+      cancelAnimationFrame(raf);
+      overlay.classList.add('is-hide');
+      document.documentElement.classList.remove('is-loading');
+      setTimeout(function () { if (overlay && overlay.parentNode) overlay.parentNode.removeChild(overlay); }, 700);
+    }
+    // เปิดให้เรียกจากภายนอก (script.js)
+    window.AppLoader = { set: setProgress, finish: finish, done: finish };
+
+    // ตรวจจับว่า "เนื้อหาจริง" แสดงแล้ว (ไม่ใช่โครงโหลด skeleton) แล้วปิดตัวโหลดเอง
+    // ทำให้ใช้ได้แม้ยังไม่ได้อัปเดต script.js
+    (function watchApp() {
+      var appEl = document.getElementById('app');
+      if (!appEl) { setTimeout(watchApp, 50); return; }
+      var obs = new MutationObserver(function () {
+        var f = appEl.firstElementChild;
+        if (f && !f.classList.contains('skeleton-grid') && !f.classList.contains('skeleton')) {
+          obs.disconnect();
+          finish();
+        }
+      });
+      obs.observe(appEl, { childList: true });
+    })();
+
+    // กันค้าง: ถ้าโหลดนานผิดปกติ ให้ปิดเองหลังหน้าเว็บโหลดเสร็จ
+    window.addEventListener('load', function () { setTimeout(finish, 6000); });
+  })();
+  </script>
 
   <!-- ===================== แถบบนสุด (Top bar) ===================== -->
   <header class="topbar">
@@ -70,6 +297,6 @@
   <div class="toast-wrap" id="toastWrap"></div>
 
   <!-- ไฟล์ JavaScript หลัก (ใส่ไว้ท้ายสุดเพื่อให้โหลดหน้าก่อน) -->
-  <script src="script.js?v=9"></script>
+  <script src="script.js?v=10"></script>
 </body>
 </html>
