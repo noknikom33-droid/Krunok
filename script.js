@@ -8,7 +8,7 @@
    ★  สำคัญ: นำ "Web app URL" ที่ได้จากการ Deploy Code.gs (ลงท้าย /exec)        ★
    ★  มาวางแทนที่ค่าด้านล่างนี้                                                  ★
    ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★ */
-const API_URL = 'https://script.google.com/macros/s/AKfycbzGmcCrs06fIBNyR1onhuLFmSRa9hDKq2CH-hxZV7sgGB2AJaTl2BFtOikES49oayOh/exec';
+const API_URL = 'https://script.google.com/macros/s/AKfycbw6ZORvhiEVjmJVo_D9bfeg7ODd1R4s9wj9Z_ZDiIxgXQcjlf9smRkaqSJ6cdgOKnta/exec';
 
 
 /* ============================================================================
@@ -58,6 +58,38 @@ function hexToRgba(hex, alpha) {
 
 // เรียงข้อมูลตามคอลัมน์ order (น้อยไปมาก)
 function byOrder(a, b) { return (Number(a.order) || 0) - (Number(b.order) || 0); }
+
+// แปลงวันที่ให้เป็นภาษาไทย เช่น "วันจันทร์ที่ 22 มิถุนายน 2569"
+// รองรับทั้งข้อความ ISO (2026-06-21T17:00:00.000Z), "2026-06-22" หรือออบเจกต์ Date
+function formatThaiDate(val) {
+  if (!val) return '';
+  const d = new Date(val);
+  if (isNaN(d.getTime())) return String(val);   // ถ้าไม่ใช่วันที่ ให้แสดงตามเดิม
+  try {
+    const days = ['อาทิตย์', 'จันทร์', 'อังคาร', 'พุธ', 'พฤหัสบดี', 'ศุกร์', 'เสาร์'];
+    const months = ['มกราคม', 'กุมภาพันธ์', 'มีนาคม', 'เมษายน', 'พฤษภาคม', 'มิถุนายน', 'กรกฎาคม', 'สิงหาคม', 'กันยายน', 'ตุลาคม', 'พฤศจิกายน', 'ธันวาคม'];
+    // ดึงวัน/เดือน/ปี/วันในสัปดาห์ ตามเวลาประเทศไทย (กันวันคลาดเคลื่อนจาก timezone)
+    const parts = new Intl.DateTimeFormat('en-US', { timeZone: 'Asia/Bangkok', weekday: 'short', year: 'numeric', month: 'numeric', day: 'numeric' }).formatToParts(d);
+    const get = (t) => { const p = parts.find(x => x.type === t); return p ? p.value : ''; };
+    const wd = { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 }[get('weekday')] || 0;
+    const day = parseInt(get('day'), 10);
+    const month = parseInt(get('month'), 10) - 1;
+    const year = parseInt(get('year'), 10) + 543;   // แปลงเป็น พ.ศ.
+    return 'วัน' + days[wd] + 'ที่ ' + day + ' ' + months[month] + ' ' + year;
+  } catch (e) { return String(val); }
+}
+
+// แปลงค่าวันที่ให้อยู่ในรูป yyyy-MM-dd สำหรับช่อง <input type="date">
+function toDateInputValue(val) {
+  if (!val) return '';
+  const d = new Date(val);
+  if (isNaN(d.getTime())) return String(val).slice(0, 10);
+  try {
+    const parts = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Bangkok', year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(d);
+    const get = (t) => parts.find(x => x.type === t).value;
+    return get('year') + '-' + get('month') + '-' + get('day');
+  } catch (e) { return String(val).slice(0, 10); }
+}
 
 const isTeacher = () => !!state.token;
 
@@ -360,7 +392,7 @@ function announceCard(a) {
         <div class="announce-top">
           ${pinned ? '<span class="announce-pin">📌 ปักหมุด</span>' : ''}
           ${hidden ? '<span class="announce-hidetag">ซ่อนอยู่</span>' : ''}
-          <span class="announce-date">${esc(a.date || '')}</span>
+          <span class="announce-date">${esc(formatThaiDate(a.date))}</span>
         </div>
         <h3 class="announce-title">${esc(a.title || '')}</h3>
         ${a.detail ? `<p class="announce-detail">${esc(a.detail)}</p>` : ''}
@@ -947,14 +979,14 @@ function openWorkForm(id, lessonId) {
 function openAnnounceForm(id) {
   const a = id ? state.announcements.find(x => x.id === id) || {} : {};
   const isEdit = !!id;
-  const today = new Date().toISOString().slice(0, 10);
+  const today = toDateInputValue(new Date());
   const pinned = String(a.pin).toLowerCase() === 'yes' || a.pin === true;
   openModal(isEdit ? 'แก้ไขประกาศ' : 'เพิ่มประกาศใหม่', `
     <form id="announceForm" novalidate>
       <div class="field"><label>หัวข้อประกาศ <span class="req">*</span></label><input name="title" value="${esc(a.title || '')}" placeholder="เช่น เปิดบทเรียนใหม่ / แจ้งสอบ" /><div class="err">กรุณากรอกหัวข้อ</div></div>
       <div class="field"><label>รายละเอียด</label><textarea name="detail" placeholder="ข้อความที่อยากแจ้งนักเรียน/ผู้ปกครอง">${esc(a.detail || '')}</textarea></div>
       <div class="row2">
-        <div class="field"><label>วันที่</label><input type="date" name="date" value="${esc(a.date || today)}" /></div>
+        <div class="field"><label>วันที่</label><input type="date" name="date" value="${esc(toDateInputValue(a.date) || today)}" /></div>
         <div class="field"><label>การแสดงผล</label><select name="status"><option value="active" ${(a.status||'active')==='active'?'selected':''}>แสดง (เปิด)</option><option value="inactive" ${a.status==='inactive'?'selected':''}>ซ่อน (ปิด)</option></select></div>
       </div>
       <div class="field check-field"><label><input type="checkbox" name="pin" ${pinned ? 'checked' : ''} /> 📌 ปักหมุดให้อยู่บนสุด</label></div>
