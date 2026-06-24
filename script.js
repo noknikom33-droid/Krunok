@@ -37,6 +37,23 @@ const app = $('#app');
 function loaderSet(p)  { try { if (window.AppLoader && window.AppLoader.set)    window.AppLoader.set(p); } catch (e) {} }
 function loaderDone()  { try { if (window.AppLoader && window.AppLoader.finish) window.AppLoader.finish(); } catch (e) {} }
 
+// --- ตัวช่วยจำ "ตัวตนนักเรียน" และ "บทที่ดูจบแล้ว" ไว้ในเครื่อง (localStorage) ---
+// (ใช้เพื่อความสะดวก ไม่ต้องพิมพ์ชื่อซ้ำ และจำว่าดูบทไหนจบไปแล้ว)
+function getStudentInfo() {
+  try { return JSON.parse(localStorage.getItem('cr_student') || '{}'); } catch (e) { return {}; }
+}
+function saveStudentInfo(info) {
+  try { localStorage.setItem('cr_student', JSON.stringify(info || {})); } catch (e) {}
+}
+function getCompletedLessons() {
+  try { return JSON.parse(localStorage.getItem('cr_completed') || '[]'); } catch (e) { return []; }
+}
+function markCompleted(lessonId) {
+  const arr = getCompletedLessons();
+  if (!arr.includes(lessonId)) { arr.push(lessonId); try { localStorage.setItem('cr_completed', JSON.stringify(arr)); } catch (e) {} }
+}
+function isCompleted(lessonId) { return getCompletedLessons().includes(lessonId); }
+
 // ป้องกันโค้ดอันตรายจากข้อความ (escape) ก่อนเอาไปแสดง
 function esc(s) {
   return String(s == null ? '' : s)
@@ -98,21 +115,46 @@ function toDateInputValue(val) {
 
 const isTeacher = () => !!state.token;
 
-// ดึงรหัสวิดีโอจากลิงก์ YouTube หลายรูปแบบ แล้วคืน URL สำหรับฝัง (embed)
+// ดึงรหัสวิดีโอ (11 ตัวอักษร) จากลิงก์ YouTube หลายรูปแบบ
 // รองรับ: youtube.com/watch?v=ID, youtu.be/ID, /embed/ID, /shorts/ID, /live/ID
-// คืน null ถ้าไม่ใช่ลิงก์ YouTube (จะได้ fallback ไปเปิดแท็บใหม่แทน)
-function youtubeEmbedUrl(url) {
+// คืน null ถ้าไม่ใช่ลิงก์ YouTube
+function youtubeId(url) {
   if (!url) return null;
   const u = String(url).trim();
-  let id = '';
   let m;
-  if ((m = u.match(/[?&]v=([A-Za-z0-9_-]{11})/))) id = m[1];
-  else if ((m = u.match(/youtu\.be\/([A-Za-z0-9_-]{11})/))) id = m[1];
-  else if ((m = u.match(/\/embed\/([A-Za-z0-9_-]{11})/))) id = m[1];
-  else if ((m = u.match(/\/shorts\/([A-Za-z0-9_-]{11})/))) id = m[1];
-  else if ((m = u.match(/\/live\/([A-Za-z0-9_-]{11})/))) id = m[1];
-  if (!id) return null;
-  return 'https://www.youtube.com/embed/' + id;
+  if ((m = u.match(/[?&]v=([A-Za-z0-9_-]{11})/))) return m[1];
+  if ((m = u.match(/youtu\.be\/([A-Za-z0-9_-]{11})/))) return m[1];
+  if ((m = u.match(/\/embed\/([A-Za-z0-9_-]{11})/))) return m[1];
+  if ((m = u.match(/\/shorts\/([A-Za-z0-9_-]{11})/))) return m[1];
+  if ((m = u.match(/\/live\/([A-Za-z0-9_-]{11})/))) return m[1];
+  return null;
+}
+
+// คืน URL สำหรับฝัง (embed) — ใช้ในกรณีที่ฝังแบบ iframe ธรรมดา (ครูพรีวิว ฯลฯ)
+function youtubeEmbedUrl(url) {
+  const id = youtubeId(url);
+  return id ? 'https://www.youtube.com/embed/' + id : null;
+}
+
+// อ่าน "เกณฑ์การดูจบ" (%) จากการตั้งค่า — จำกัด 50–100 ค่าเริ่มต้น 90
+function watchThreshold() {
+  const v = Number(state.settings.register_complete_pct);
+  return (isFinite(v) && v > 0) ? Math.max(50, Math.min(100, Math.round(v))) : 90;
+}
+
+// โหลดสคริปต์ YouTube IFrame API ครั้งเดียว แล้วคืน Promise เมื่อพร้อมใช้งาน
+let _ytApiPromise = null;
+function loadYouTubeAPI() {
+  if (window.YT && window.YT.Player) return Promise.resolve();
+  if (_ytApiPromise) return _ytApiPromise;
+  _ytApiPromise = new Promise((resolve) => {
+    const prev = window.onYouTubeIframeAPIReady;
+    window.onYouTubeIframeAPIReady = () => { if (typeof prev === 'function') { try { prev(); } catch (e) {} } resolve(); };
+    const tag = document.createElement('script');
+    tag.src = 'https://www.youtube.com/iframe_api';
+    document.head.appendChild(tag);
+  });
+  return _ytApiPromise;
 }
 
 /* ============================================================================
@@ -635,9 +677,11 @@ function lessonCard(l, i) {
     ? `<img src="${esc(cover)}" alt="${esc(l.lesson_name)}" loading="lazy" onerror="this.parentNode.classList.add('gradient');this.remove()" />`
     : `<span class="placeholder">📖</span>`;
   const cls = (l.status || 'active') !== 'active' ? 'card inactive' : 'card';
+  // ป้ายเล็ก ๆ บอกว่าเป็นวิดีโอ
+  const videoTag = (l.link_type || 'lesson') === 'video' ? '<span class="card-vtag">▶️ วิดีโอ</span>' : '';
   return `
     <div class="${cls}" style="animation-delay:${i * 60}ms" onclick="goLesson('${esc(l.id)}')" tabindex="0" onkeydown="if(event.key==='Enter')goLesson('${esc(l.id)}')">
-      <div class="card-cover ${cover ? '' : 'gradient'}">${coverHtml}</div>
+      <div class="card-cover ${cover ? '' : 'gradient'}">${videoTag}${coverHtml}</div>
       <div class="card-body">
         <div class="card-title">${esc(l.lesson_name)}</div>
         <div class="card-desc">${esc(l.description || '')}</div>
@@ -680,30 +724,27 @@ async function renderLesson(lessonId) {
   const cover = imgUrl(lesson.cover_image);
   const link = lesson.link ? esc(lesson.link) : '';
   const isVideo = (lesson.link_type || 'lesson') === 'video';
-  const embed = isVideo ? youtubeEmbedUrl(lesson.link) : null;
+  const ytId = isVideo ? youtubeId(lesson.link) : null;   // ฝัง+นับการดูได้เฉพาะลิงก์ YouTube
+  const threshold = watchThreshold();
 
   // ปุ่ม/วิดีโอ ตามชนิดเนื้อหา
   //  - บทเรียนออนไลน์ -> ปุ่ม "เข้าเรียน" เปิดแท็บใหม่
-  //  - วิดีโอ YouTube  -> ฝังเล่นในหน้าเลย (ไม่ต้องเปิดแท็บใหม่)
-  //  - วิดีโออื่นที่ฝังไม่ได้ -> ปุ่ม "ดูวิดีโอ" เปิดแท็บใหม่
+  //  - วิดีโอ YouTube  -> ฝังเล่นในหน้าเลย (นับการดู + ออกเกียรติบัตร)
+  //  - วิดีโออื่นที่ฝังไม่ได้ -> ปุ่ม "ดูวิดีโอ" เปิดแท็บใหม่ (นับการดูไม่ได้)
   let actionHtml;
   if (!link) {
     actionHtml = `<span class="btn btn-outline" style="cursor:default">ยังไม่มีลิงก์บทเรียน</span>`;
-  } else if (isVideo && !embed) {
+  } else if (isVideo && !ytId) {
     actionHtml = `<a class="btn btn-primary" href="${link}" target="_blank" rel="noopener">▶️ ดูวิดีโอ</a>`;
   } else if (!isVideo) {
     actionHtml = `<a class="btn btn-primary" href="${link}" target="_blank" rel="noopener">🚀 เข้าเรียนบทนี้</a>`;
   } else {
-    actionHtml = '';   // เป็นวิดีโอฝังได้ -> ไม่ต้องมีปุ่ม (แสดงวิดีโอด้านล่างแทน)
+    actionHtml = '';   // วิดีโอ YouTube ฝังได้ -> ไม่ต้องมีปุ่ม (เล่นในหน้าด้านล่าง)
   }
 
-  // กล่องวิดีโอฝัง (ถ้าเป็น YouTube)
-  const videoHtml = embed ? `
-    <section class="video-embed">
-      <iframe src="${esc(embed)}" title="${esc(lesson.lesson_name)}" loading="lazy"
-        allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
-        allowfullscreen referrerpolicy="strict-origin-when-cross-origin"></iframe>
-    </section>` : '';
+  // กล่องวิดีโอฝัง: ใช้ div ให้ YouTube IFrame API มาสร้างตัวเล่น (เพื่อจับความคืบหน้าได้)
+  const videoHtml = ytId ? `
+    <section class="video-embed"><div id="ytPlayer"></div></section>` : '';
 
   let worksHtml;
   if (!works.length) {
@@ -711,6 +752,9 @@ async function renderLesson(lessonId) {
   } else {
     worksHtml = `<div class="works-grid">${works.map((w, i) => workCard(w, i)).join('')}</div>`;
   }
+
+  // เปิดระบบดูจบ/เกียรติบัตรไหม (ครูตั้งค่าได้)
+  const regOn = (state.settings.register_enabled || 'yes') !== 'no';
 
   app.innerHTML = `
     <nav class="crumbs">
@@ -733,6 +777,10 @@ async function renderLesson(lessonId) {
 
     ${videoHtml}
 
+    ${(isVideo && ytId && regOn && !isTeacher()) ? videoGateWrap(lesson, threshold) : ''}
+    ${(isVideo && !ytId && regOn && !isTeacher()) ? nonEmbedNote() : ''}
+    ${(isVideo && regOn) ? videoRosterSection(lesson) : ''}
+
     <div class="section-head">
       <h2>🎨 ผลงานนักเรียน <span class="count">(${works.length})</span></h2>
       <button class="btn btn-accent teacher-only" onclick="openWorkForm(null,'${esc(lesson.id)}')">➕ เพิ่มผลงาน</button>
@@ -740,6 +788,14 @@ async function renderLesson(lessonId) {
     ${worksHtml}
   `;
   loaderDone();
+
+  // ระบบดูวิดีโอ:
+  //  - มีลิงก์ YouTube -> สร้างตัวเล่น + (นักเรียน) ติดตามการดูจนจบเพื่อออกเกียรติบัตร
+  //  - ครู -> โหลดรายชื่อนักเรียนที่ดูจบมาแสดง
+  if (isVideo) {
+    if (ytId) initVideoPlayer(lesson, ytId, threshold);
+    if (regOn && isTeacher()) refreshRoster(lesson.id);
+  }
 }
 
 function findLessonInCache(lessonId) {
@@ -772,6 +828,311 @@ function workCard(w, i) {
       </div>
     </div>`;
 }
+
+/* ============================================================================
+   12.5) ★ ระบบลงทะเบียนดูวิดีโอ
+   ============================================================================ */
+
+// กล่องสถานะการดู/รับเกียรติบัตร (ใต้วิดีโอ ฝั่งนักเรียน) — เนื้อหาเปลี่ยนตามสถานะโดย initVideoPlayer
+function videoGateWrap(lesson, threshold) {
+  const school = state.settings.register_school || state.settings.site_title || 'โรงเรียนของเรา';
+  return `
+    <section class="video-gate" id="videoGateWrap">
+      <div class="vg-head">📺 สำหรับนักเรียน <b>${esc(school)}</b> — ดูวิดีโอให้จบเพื่อรับเกียรติบัตร</div>
+      <div class="vp-progress"><div class="vp-bar" id="vpBar"></div></div>
+      <div class="vp-meta"><span id="vpPct">ดูแล้ว 0%</span><span id="vpHint" class="vp-hint"></span></div>
+      <div id="videoGate"></div>
+    </section>`;
+}
+
+// ข้อความเตือนเมื่อลิงก์ฝังไม่ได้ (ไม่ใช่ YouTube มาตรฐาน) จึงนับการดูไม่ได้
+function nonEmbedNote() {
+  return `
+    <section class="reg-box">
+      <div class="reg-ic">⚠️</div>
+      <div class="reg-main">
+        <div class="reg-t">ลิงก์นี้ฝังเล่นในหน้าไม่ได้ ระบบจึงนับการดู/ออกเกียรติบัตรอัตโนมัติไม่ได้</div>
+        <div class="reg-sub">แนะนำให้คุณครูแก้บทเรียนนี้ ใช้ลิงก์ YouTube มาตรฐาน เช่น youtu.be/xxxx หรือ youtube.com/watch?v=xxxx</div>
+      </div>
+    </section>`;
+}
+
+// ฟอร์มกรอกชื่อ (ใช้ทั้งก่อนเริ่มดู และตอนดูจบ) — เติมข้อมูลเดิมจากเครื่องให้อัตโนมัติ
+function identityFormHtml(submitLabel) {
+  const info = getStudentInfo();
+  return `
+    <form id="idForm" class="vg-form" novalidate>
+      <div class="field"><label>ชื่อ-นามสกุล <span class="req">*</span></label><input name="student_name" value="${esc(info.student_name || '')}" placeholder="เช่น เด็กหญิงมานี ใจดี" /><div class="err">กรุณากรอกชื่อ-นามสกุล</div></div>
+      <div class="row2">
+        <div class="field"><label>ชั้น/ห้อง</label><input name="student_class" value="${esc(info.student_class || '')}" placeholder="เช่น ป.6/1" /></div>
+        <div class="field"><label>เลขที่</label><input name="student_no" value="${esc(info.student_no || '')}" placeholder="เช่น 12" /></div>
+      </div>
+      <button type="submit" class="btn btn-primary btn-block">${esc(submitLabel)}</button>
+    </form>`;
+}
+function wireIdentityForm(after) {
+  const f = document.getElementById('idForm');
+  if (!f) return;
+  f.addEventListener('submit', (e) => {
+    e.preventDefault();
+    const name = f.elements.student_name.value.trim();
+    f.elements.student_name.closest('.field').classList.toggle('invalid', !name);
+    if (!name) return;
+    saveStudentInfo({
+      student_name: name,
+      student_class: f.elements.student_class.value.trim(),
+      student_no: f.elements.student_no.value.trim()
+    });
+    if (after) after();
+  });
+}
+
+// สร้างตัวเล่น YouTube + ติดตามการดูจริง (กันลากข้าม) เพื่อออกเกียรติบัตรเมื่อดูครบเกณฑ์
+function initVideoPlayer(lesson, ytId, threshold) {
+  // ล้างตัวเล่น/ตัวจับเวลาเดิม (กันซ้อนเมื่อเปลี่ยนหน้า)
+  if (state._player) { try { state._player.destroy(); } catch (e) {} state._player = null; }
+  if (state._trackTimer) { clearInterval(state._trackTimer); state._trackTimer = null; }
+
+  const teacher = isTeacher();
+  const totalBuckets = 24;          // แบ่งวิดีโอเป็น 24 ช่วง ต้องดูผ่านจริงทุกช่วงถึงจะนับ
+  const watched = new Set();
+  let completed = isCompleted(lesson.id);   // เคยดูจบแล้ว (จำในเครื่อง)
+
+  const byId = (id) => document.getElementById(id);
+  const pct = () => Math.round(watched.size / totalBuckets * 100);
+
+  function paintProgress(p) {
+    p = Math.min(100, p);
+    const bar = byId('vpBar'); if (bar) bar.style.width = p + '%';
+    const t = byId('vpPct'); if (t) t.textContent = 'ดูแล้ว ' + p + '%';
+  }
+
+  function renderGate() {
+    const gate = byId('videoGate');
+    const hint = byId('vpHint');
+    if (!gate) return;
+
+    if (completed) {
+      if (hint) hint.textContent = '';
+      paintProgress(100);
+      const info = getStudentInfo();
+      const certOn = (state.settings.cert_enabled || 'yes') !== 'no';
+      gate.innerHTML = `
+        <div class="vg-done">
+          <div class="vg-done-ic">🎉</div>
+          <div class="vg-done-main">
+            <div class="vg-done-t">ดูวิดีโอจบแล้ว${info.student_name ? ' — ' + esc(info.student_name) : ''}</div>
+            <div class="vg-done-s">คุณครูเห็นชื่อหนูในรายการเรียบร้อยแล้ว</div>
+          </div>
+          ${certOn ? `<button class="btn btn-primary" id="vgCert">🏆 รับเกียรติบัตร</button>` : ''}
+        </div>`;
+      const cb = byId('vgCert');
+      if (cb) cb.onclick = () => openCertificate(lesson);
+      return;
+    }
+
+    if (!getStudentInfo().student_name) {
+      if (hint) hint.textContent = 'กรอกชื่อก่อนเริ่มดู เพื่อให้ระบบบันทึกและออกเกียรติบัตรให้ (บุคคลทั่วไปไม่ต้องกรอกก็ดูได้)';
+      gate.innerHTML = identityFormHtml('▶️ เริ่มดูเพื่อรับเกียรติบัตร');
+      wireIdentityForm(() => renderGate());   // กรอกชื่อแล้ว เริ่มนับเครดิตให้
+      return;
+    }
+
+    if (hint) hint.textContent = 'ดูให้ถึง ' + threshold + '% แล้วปุ่มรับเกียรติบัตรจะปรากฏ (ระบบนับเฉพาะส่วนที่ดูจริง ลากข้ามไม่นับ)';
+    gate.innerHTML = `<div class="vg-waiting">⏳ กำลังดู… ตั้งใจดูต่อให้ครบเพื่อรับเกียรติบัตรนะ</div>`;
+  }
+
+  function onReachComplete() {
+    if (completed) return;
+    if (!getStudentInfo().student_name) {
+      // ดูจบแล้วแต่ยังไม่กรอกชื่อ -> ขอให้กรอกแล้วบันทึก
+      const gate = byId('videoGate'); const hint = byId('vpHint');
+      if (hint) hint.textContent = 'ดูจบแล้ว! กรอกชื่อเพื่อบันทึกและรับเกียรติบัตร';
+      if (gate) { gate.innerHTML = identityFormHtml('✅ บันทึกและรับเกียรติบัตร'); wireIdentityForm(() => finishComplete()); }
+      return;
+    }
+    finishComplete();
+  }
+
+  async function finishComplete() {
+    if (completed) return;
+    completed = true;
+    const info = getStudentInfo();
+    const item = {
+      lesson_id: lesson.id,
+      student_name: info.student_name,
+      student_class: info.student_class || '',
+      student_no: info.student_no || '',
+      lesson_name: lesson.lesson_name || '',
+      percent: Math.max(pct(), threshold),
+      status: 'completed'
+    };
+    try {
+      await apiPost('registerView', { item });
+      markCompleted(lesson.id);
+      toast('ยินดีด้วย! ดูจบแล้ว รับเกียรติบัตรได้เลย 🎉', 'success');
+    } catch (err) {
+      completed = false;
+      toast('บันทึกไม่สำเร็จ: ' + err.message, 'error');
+      return;
+    }
+    renderGate();
+  }
+
+  function tick() {
+    const p = state._player;
+    if (!p || !p.getDuration) return;
+    const dur = p.getDuration() || 0;
+    const cur = p.getCurrentTime() || 0;
+    if (dur <= 0) return;
+    const b = Math.min(totalBuckets - 1, Math.floor(cur / dur * totalBuckets));
+    watched.add(b);
+    paintProgress(pct());
+    if (!teacher && pct() >= threshold) onReachComplete();
+  }
+
+  loadYouTubeAPI().then(() => {
+    const mount = byId('ytPlayer');
+    if (!mount) return;
+    state._player = new YT.Player('ytPlayer', {
+      width: '100%', height: '100%', videoId: ytId,
+      playerVars: { rel: 0, modestbranding: 1, playsinline: 1 },
+      events: {
+        onReady: () => { if (!teacher) renderGate(); },
+        onStateChange: (e) => {
+          if (e.data === YT.PlayerState.PLAYING) {
+            if (!state._trackTimer) state._trackTimer = setInterval(tick, 1000);
+          } else {
+            clearInterval(state._trackTimer); state._trackTimer = null;
+          }
+          if (e.data === YT.PlayerState.ENDED) {
+            for (let i = 0; i < totalBuckets; i++) watched.add(i);  // ดูจนจบ = ครบทุกช่วง
+            paintProgress(100);
+            if (!teacher) onReachComplete();
+          }
+        }
+      }
+    });
+  });
+
+  if (!teacher) renderGate();   // วาดสถานะเริ่มต้นทันที (ก่อน API พร้อม)
+}
+
+// เปิดเกียรติบัตร (ดูได้เต็มจอ + พิมพ์/บันทึกเป็น PDF)
+function openCertificate(lesson) {
+  const info = getStudentInfo();
+  const s = state.settings;
+  const school = s.register_school || s.site_title || 'ห้องเรียนออนไลน์';
+  const teacherName = s.about_name || '';
+  const teacherRole = s.about_role || 'ครูผู้สอน';
+  const dateText = formatThaiDate(new Date());
+  const detail = [
+    info.student_class ? ('ชั้น ' + info.student_class) : '',
+    info.student_no ? ('เลขที่ ' + info.student_no) : ''
+  ].filter(Boolean).join('   ');
+
+  const old = document.getElementById('certOverlay');
+  if (old) old.remove();
+  const overlay = document.createElement('div');
+  overlay.id = 'certOverlay';
+  overlay.className = 'cert-overlay';
+  overlay.innerHTML = `
+    <div class="cert-toolbar no-print">
+      <button class="btn btn-primary" onclick="window.print()">🖨️ พิมพ์ / บันทึกเป็น PDF</button>
+      <button class="btn btn-outline" onclick="closeCertificate()">ปิด</button>
+    </div>
+    <div class="cert-scroll">
+      <div class="cert-paper" id="certPaper">
+        <div class="cert-frame">
+          <div class="cert-corner tl"></div><div class="cert-corner tr"></div>
+          <div class="cert-corner bl"></div><div class="cert-corner br"></div>
+          <div class="cert-seal">🏆</div>
+          <div class="cert-school">${esc(school)}</div>
+          <div class="cert-kicker">เกียรติบัตรฉบับนี้ให้ไว้เพื่อแสดงว่า</div>
+          <div class="cert-name">${esc(info.student_name || 'นักเรียน')}</div>
+          ${detail ? `<div class="cert-detail">${esc(detail)}</div>` : ''}
+          <div class="cert-line">ได้รับชมวิดีโอบทเรียน</div>
+          <div class="cert-lesson">“${esc(lesson.lesson_name || '')}”</div>
+          <div class="cert-line">จนจบครบถ้วน ด้วยความตั้งใจ</div>
+          <div class="cert-date">ให้ไว้ ณ ${esc(dateText)}</div>
+          <div class="cert-sign">
+            <div class="cert-sign-name">${esc(teacherName || '____________________')}</div>
+            <div class="cert-sign-role">${esc(teacherRole)}</div>
+          </div>
+        </div>
+      </div>
+    </div>`;
+  document.body.appendChild(overlay);
+  document.body.classList.add('cert-open');
+}
+function closeCertificate() {
+  const o = document.getElementById('certOverlay');
+  if (o) o.remove();
+  document.body.classList.remove('cert-open');
+}
+
+// ส่วนรายชื่อนักเรียนที่ลงทะเบียน (เฉพาะครู) — ตัวเนื้อหาจะถูกเติมโดย refreshRoster()
+function videoRosterSection(lesson) {
+  if (!isTeacher()) return '';
+  return `
+    <div class="section-head">
+      <h2>📋 นักเรียนที่ดูวิดีโอจบแล้ว <span class="count" id="rosterCount"></span></h2>
+      <button class="btn btn-outline btn-sm" onclick="refreshRoster('${esc(lesson.id)}')">🔄 รีเฟรช</button>
+    </div>
+    <div id="viewRoster" class="view-roster">
+      <div class="state"><div class="spinner"></div><p>กำลังโหลดรายชื่อ...</p></div>
+    </div>`;
+}
+
+// โหลดรายชื่อจากเซิร์ฟเวอร์ (ต้องเป็นครู) แล้ววาดลงในกล่อง
+async function refreshRoster(lessonId) {
+  const box = document.getElementById('viewRoster');
+  if (box) box.innerHTML = `<div class="state"><div class="spinner"></div><p>กำลังโหลดรายชื่อ...</p></div>`;
+  try {
+    const list = await apiPost('getViews', { lesson_id: lessonId });
+    renderRoster(lessonId, list || []);
+  } catch (err) {
+    if (box) box.innerHTML = viewError(err.message);
+  }
+}
+
+function renderRoster(lessonId, list) {
+  const box = document.getElementById('viewRoster');
+  const cnt = document.getElementById('rosterCount');
+  if (cnt) cnt.textContent = '(' + list.length + ' คน)';
+  if (!box) return;
+  if (!list.length) {
+    box.innerHTML = viewEmpty('🙋', 'ยังไม่มีนักเรียนดูจบ', 'เมื่อนักเรียนดูวิดีโอจนครบเกณฑ์ รายชื่อจะมาแสดงที่นี่อัตโนมัติ');
+    return;
+  }
+  box.innerHTML = `
+    <div class="roster-table">
+      <div class="roster-head"><span>#</span><span>ชื่อ-นามสกุล</span><span>ชั้น/ห้อง</span><span>เลขที่</span><span>สถานะ</span><span>เวลา</span><span></span></div>
+      ${list.map((v, i) => {
+        const done = String(v.status || 'completed') === 'completed';
+        const p = Number(v.percent) || 0;
+        const statusHtml = done ? '<span class="tag-done">✅ ดูจบ</span>' : ('👀 ' + p + '%');
+        return `
+        <div class="roster-row">
+          <span class="r-no">${i + 1}</span>
+          <span class="r-name">${esc(v.student_name || '-')}</span>
+          <span>${esc(v.student_class || '-')}</span>
+          <span>${esc(v.student_no || '-')}</span>
+          <span class="r-status">${statusHtml}</span>
+          <span class="r-date">${esc(v.date || '')}</span>
+          <span class="r-act"><button class="btn btn-danger btn-sm" onclick="confirmDeleteView('${esc(v.id)}','${esc(lessonId)}')">🗑️</button></span>
+        </div>`;
+      }).join('')}
+    </div>`;
+}
+
+function confirmDeleteView(id, lessonId) {
+  openConfirm('ต้องการลบรายการนี้?', 'รายการที่เลือก', '', async () => {
+    await apiPost('deleteView', { id });
+    refreshRoster(lessonId);
+  });
+}
+
 
 /* ============================================================================
    13) หน้าตั้งค่าเว็บไซต์ (เฉพาะครู)
@@ -818,6 +1179,35 @@ async function renderSettings() {
         <div class="field">
           <label>ข้อความท้ายเว็บ (Footer)</label>
           <input name="footer_text" value="${esc(s.footer_text || '')}" placeholder="เช่น จัดทำด้วยใจ เพื่อการเรียนรู้" />
+        </div>
+
+        <div class="settings-divider">📺 การดูวิดีโอ & เกียรติบัตร</div>
+        <div class="field">
+          <label>ระบบดูวิดีโอจบเพื่อรับเกียรติบัตร</label>
+          <select name="register_enabled">
+            <option value="yes" ${(s.register_enabled || 'yes') === 'yes' ? 'selected' : ''}>เปิด (นักเรียนต้องดูจบถึงมีชื่อ + รับเกียรติบัตร)</option>
+            <option value="no" ${s.register_enabled === 'no' ? 'selected' : ''}>ปิด (ดูวิดีโออย่างเดียว ไม่ต้องบันทึก)</option>
+          </select>
+        </div>
+        <div class="field">
+          <label>ชื่อโรงเรียน/กลุ่ม (แสดงในหน้าวิดีโอและบนเกียรติบัตร)</label>
+          <input name="register_school" value="${esc(s.register_school || '')}" placeholder="เช่น โรงเรียนนิคมสร้างตนเอง 3" />
+          <div class="hint">ถ้าเว้นว่างจะใช้ชื่อเว็บไซต์แทน</div>
+        </div>
+        <div class="row2">
+          <div class="field">
+            <label>เกณฑ์การดูจบ (%)</label>
+            <input type="number" name="register_complete_pct" min="50" max="100" step="1" value="${esc(s.register_complete_pct || 90)}" />
+            <div class="hint">ต้องดูถึงกี่ % จึงนับว่า "ดูจบ" — แนะนำ 90% (ต่ำสุด 50, สูงสุด 100)</div>
+          </div>
+          <div class="field">
+            <label>มอบเกียรติบัตรเมื่อดูจบ</label>
+            <select name="cert_enabled">
+              <option value="yes" ${(s.cert_enabled || 'yes') === 'yes' ? 'selected' : ''}>เปิด (มีปุ่มรับเกียรติบัตร)</option>
+              <option value="no" ${s.cert_enabled === 'no' ? 'selected' : ''}>ปิด</option>
+            </select>
+            <div class="hint">เกียรติบัตรใช้ชื่อครูจาก "เกี่ยวกับผู้สอน" ด้านล่าง</div>
+          </div>
         </div>
 
         <div class="settings-divider">👩‍🏫 เกี่ยวกับผู้สอน</div>
@@ -874,6 +1264,10 @@ async function renderSettings() {
       primary_color: f.elements.primary_color.value,
       accent_color: f.elements.accent_color.value,
       footer_text: f.elements.footer_text.value.trim(),
+      register_enabled: f.elements.register_enabled.value,
+      register_school: f.elements.register_school.value.trim(),
+      register_complete_pct: Math.max(50, Math.min(100, Number(f.elements.register_complete_pct.value) || 90)),
+      cert_enabled: f.elements.cert_enabled.value,
       about_name: f.elements.about_name.value.trim(),
       about_role: f.elements.about_role.value.trim(),
       about_photo: f.elements.about_photo.value.trim(),
@@ -1025,7 +1419,7 @@ function openLessonForm(id, subjectId) {
         <label>ชนิดเนื้อหา</label>
         <select name="link_type" id="lf_type">
           <option value="lesson" ${(lesson.link_type||'lesson')==='lesson'?'selected':''}>บทเรียนออนไลน์ (กดแล้วเปิดแท็บใหม่)</option>
-          <option value="video" ${lesson.link_type==='video'?'selected':''}>วิดีโอ YouTube (ฝังให้ดูในหน้านี้)</option>
+          <option value="video" ${lesson.link_type==='video'?'selected':''}>วิดีโอ YouTube (ฝังให้ดูในหน้านี้ + ให้นักเรียนลงทะเบียน)</option>
         </select>
       </div>
       <div class="field"><label id="lf_link_label">ลิงก์เข้าเรียน <span class="req">*</span></label><input name="link" id="lf_link" value="${esc(lesson.link || '')}" placeholder="https://..." /><div class="err">กรุณากรอกลิงก์ (ขึ้นต้นด้วย http)</div><div class="hint" id="lf_link_hint"></div></div>
