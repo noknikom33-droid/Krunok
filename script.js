@@ -294,6 +294,7 @@ function logout() {
 $('#btnLogin').onclick = openLogin;
 $('#btnLogout').onclick = logout;
 $('#btnSettings').onclick = () => { location.hash = 'view=settings'; };
+$('#btnMe').onclick = () => { location.hash = 'view=me'; };
 $('#brandLink').onclick = (e) => { e.preventDefault(); location.hash = ''; };
 
 /* ============================================================================
@@ -320,6 +321,7 @@ function viewError(msg) {
 async function router() {
   const params = new URLSearchParams(location.hash.slice(1));
   if (params.get('view') === 'settings') return renderSettings();
+  if (params.get('view') === 'me') return renderMyPage();
   if (params.get('lesson')) return renderLesson(params.get('lesson'));
   if (params.get('subject')) return renderSubject(params.get('subject'));
   return renderHome();
@@ -395,12 +397,17 @@ async function renderHome() {
 
   // เลือกวิชาที่จะแสดง: นักเรียนเห็นเฉพาะ active / ครูเห็นทั้งหมด
   const subjects = state.subjects.filter(x => isTeacher() || (x.status || 'active') === 'active');
-  let cardsHtml;
-  if (!subjects.length) {
-    cardsHtml = viewEmpty('🌱', 'ยังไม่มีวิชา', isTeacher() ? 'กดปุ่ม "เพิ่มวิชา" เพื่อเริ่มต้น' : 'คุณครูกำลังเตรียมบทเรียนอยู่ แวะมาใหม่นะ');
-  } else {
-    cardsHtml = `<div class="grid">${subjects.map((sub, i) => subjectCard(sub, i)).join('')}</div>`;
-  }
+
+  // แถบค้นหา + ปุ่มกรองตามระดับชั้น (สร้างจากข้อมูลจริง) — แสดงเมื่อมีวิชาเท่านั้น
+  const grades = gradesList();
+  const filterBar = subjects.length ? `
+    <div class="filter-bar">
+      <input id="homeSearch" class="search-input" type="search" placeholder="🔍 ค้นหาวิชาหรือบทเรียน..." value="${esc(homeSearch)}" />
+      ${grades.length > 1 ? `<div class="grade-chips">
+        <button class="chip ${homeGrade === '' ? 'active' : ''}" data-grade="">ทั้งหมด</button>
+        ${grades.map(g => `<button class="chip ${homeGrade === g ? 'active' : ''}" data-grade="${esc(g)}">${esc(g)}</button>`).join('')}
+      </div>` : ''}
+    </div>` : '';
 
   loaderSet(97);                     // กำลังจะวาดหน้าแล้ว
   app.innerHTML = `
@@ -412,15 +419,70 @@ async function renderHome() {
       <h2>วิชาทั้งหมด <span class="count">(${subjects.length})</span></h2>
       <button class="btn btn-primary teacher-only" onclick="openSubjectForm()">➕ เพิ่มวิชา</button>
     </div>
-    ${cardsHtml}
+    ${filterBar}
+    <div id="subjectGrid"></div>
 
     ${featuredWorksSection()}
     ${aboutSection()}
   `;
 
   loaderDone();          // โหลดเสร็จสมบูรณ์ -> หน้าจอโหลดวิ่งไป 100% แล้วเฟดหาย
+  setupHomeFilter();     // ผูกช่องค้นหา/ปุ่มกรอง แล้ววาดการ์ดวิชาครั้งแรก
   animateStats();        // ทำเลขสถิติวิ่งขึ้น
   startHeroRotation();   // เริ่มสลับรูปปกอัตโนมัติ (ถ้ามีหลายรูป)
+}
+
+/* ---- ค้นหา + กรองตามระดับชั้น (หน้าแรก) ---- */
+let homeSearch = '';   // คำค้นปัจจุบัน
+let homeGrade = '';    // ชั้นที่เลือก ('' = ทั้งหมด)
+
+// รวบรายชื่อระดับชั้นจากวิชาทั้งหมด (ไม่ซ้ำ เรียงตามธรรมชาติ เช่น ป.1..ป.6)
+function gradesList() {
+  const set = [];
+  state.subjects.forEach(s => { const g = String(s.grade || '').trim(); if (g && !set.includes(g)) set.push(g); });
+  set.sort((a, b) => a.localeCompare(b, 'th', { numeric: true }));
+  return set;
+}
+
+function setupHomeFilter() {
+  const search = document.getElementById('homeSearch');
+  if (search) {
+    search.addEventListener('input', () => { homeSearch = search.value; renderSubjectGrid(); });
+  }
+  document.querySelectorAll('.grade-chips .chip').forEach(chip => {
+    chip.addEventListener('click', () => {
+      homeGrade = chip.dataset.grade || '';
+      document.querySelectorAll('.grade-chips .chip').forEach(c => c.classList.toggle('active', c === chip));
+      renderSubjectGrid();
+    });
+  });
+  renderSubjectGrid();
+}
+
+// วาดเฉพาะการ์ดวิชา ตามคำค้น + ชั้นที่เลือก (ทำในหน่วยความจำ จึงเร็วทันที)
+function renderSubjectGrid() {
+  const box = document.getElementById('subjectGrid');
+  if (!box) return;
+  const q = homeSearch.trim().toLowerCase();
+  let list = state.subjects.filter(x => isTeacher() || (x.status || 'active') === 'active');
+
+  if (homeGrade) list = list.filter(s => String(s.grade || '').trim() === homeGrade);
+
+  if (q) {
+    list = list.filter(s => {
+      const inSubject = String(s.subject_name || '').toLowerCase().includes(q) || String(s.grade || '').toLowerCase().includes(q);
+      const lessons = state.lessonsCache[s.id] || [];
+      const inLesson = lessons.some(l =>
+        String(l.lesson_name || '').toLowerCase().includes(q) || String(l.description || '').toLowerCase().includes(q));
+      return inSubject || inLesson;
+    });
+  }
+
+  if (!list.length) {
+    box.innerHTML = viewEmpty('🔍', 'ไม่พบผลลัพธ์', 'ลองค้นด้วยคำอื่น หรือเลือกระดับชั้นอื่น');
+    return;
+  }
+  box.innerHTML = `<div class="grid">${list.map((sub, i) => subjectCard(sub, i)).join('')}</div>`;
 }
 
 /* ---- สลับรูปปก hero อัตโนมัติ ---- */
@@ -695,6 +757,109 @@ function lessonCard(l, i) {
 function goLesson(id) { location.hash = 'lesson=' + id; }
 
 /* ============================================================================
+   11.5) หน้า "ของฉัน" — รวมบทที่ดูจบ + เกียรติบัตร (อ่านจากเครื่องนักเรียน)
+   ============================================================================ */
+async function renderMyPage() {
+  loaderSet(25);
+  app.innerHTML = viewSkeleton();
+  try { await loadCore(); loaderSet(90); }   // ใช้ข้อมูลบทเรียนจากแคชเพื่อแสดงชื่อ/วิชา
+  catch (err) { app.innerHTML = viewError(err.message); loaderDone(); return; }
+
+  const info = getStudentInfo();
+  const certOn = (state.settings.cert_enabled || 'yes') !== 'no';
+
+  // แปลงรายการ "บทที่ดูจบ" (เก็บเป็น id ในเครื่อง) ให้เป็นข้อมูลบทเรียนจริง
+  const done = getCompletedLessons()
+    .map(id => findLessonInCache(id))
+    .filter(Boolean);
+
+  // ส่วนหัว: ชื่อนักเรียน + ปุ่มแก้ไขชื่อ
+  const who = info.student_name
+    ? `${esc(info.student_name)}${info.student_class ? ' · ' + esc(info.student_class) : ''}${info.student_no ? ' · เลขที่ ' + esc(info.student_no) : ''}`
+    : 'ยังไม่ได้กรอกชื่อ';
+
+  let listHtml;
+  if (!done.length) {
+    listHtml = viewEmpty('🌱', 'ยังไม่มีบทที่ดูจบ', 'ไปเลือกวิชาแล้วดูวิดีโอให้จบ (ทำแบบทดสอบให้ผ่าน) เพื่อสะสมเกียรติบัตรกันเลย!');
+  } else {
+    listHtml = `<div class="mine-grid">${done.map((l, i) => {
+      const sub = state.subjects.find(x => x.id === l.subject_id) || {};
+      return `
+        <div class="mine-card" style="animation-delay:${i * 50}ms">
+          <div class="mine-badge">✅</div>
+          <div class="mine-main">
+            <div class="mine-lesson">${esc(l.lesson_name)}</div>
+            <div class="mine-sub">${esc(sub.icon || '📘')} ${esc(sub.subject_name || '')} ${esc(sub.grade || '')}</div>
+          </div>
+          <div class="mine-actions">
+            <button class="btn btn-outline btn-sm" onclick="goLesson('${esc(l.id)}')">ไปที่บท</button>
+            ${certOn ? `<button class="btn btn-primary btn-sm" onclick="openCertificateById('${esc(l.id)}')">🏆 เกียรติบัตร</button>` : ''}
+          </div>
+        </div>`;
+    }).join('')}</div>`;
+  }
+
+  app.innerHTML = `
+    <nav class="crumbs"><a href="#">หน้าหลัก</a><span class="sep">›</span><span>ของฉัน</span></nav>
+
+    <section class="mine-hero">
+      <div class="mine-hero-ic">🎓</div>
+      <div class="mine-hero-info">
+        <h1>ของฉัน</h1>
+        <p class="mine-who">${who}</p>
+        <button class="btn btn-outline btn-sm" onclick="openMyNameForm()">✏️ ${info.student_name ? 'แก้ไขชื่อ' : 'กรอกชื่อ'}</button>
+      </div>
+      <div class="mine-stat">
+        <div class="mine-stat-num">${done.length}</div>
+        <div class="mine-stat-label">บทที่ดูจบ</div>
+      </div>
+    </section>
+
+    <div class="section-head"><h2>🏅 บทเรียนที่ดูจบแล้ว <span class="count">(${done.length})</span></h2></div>
+    ${listHtml}
+  `;
+  loaderDone();
+}
+
+// เปิดเกียรติบัตรจาก lesson id (ใช้ในหน้า "ของฉัน")
+function openCertificateById(lessonId) {
+  const lesson = findLessonInCache(lessonId);
+  if (!lesson) { toast('ไม่พบบทเรียนนี้แล้ว', 'error'); return; }
+  if (!getStudentInfo().student_name) { openMyNameForm(); return; }
+  openCertificate(lesson);
+}
+
+// ฟอร์มแก้ไขชื่อนักเรียน (ในหน้า "ของฉัน")
+function openMyNameForm() {
+  const info = getStudentInfo();
+  openModal('✏️ ข้อมูลของฉัน', `
+    <form id="meForm" novalidate>
+      <p class="reg-formhint">ชื่อนี้จะใช้แสดงบนเกียรติบัตรและรายชื่อของคุณครู</p>
+      <div class="field"><label>ชื่อ-นามสกุล <span class="req">*</span></label><input name="student_name" value="${esc(info.student_name || '')}" placeholder="เช่น เด็กหญิงมานี ใจดี" /><div class="err">กรุณากรอกชื่อ-นามสกุล</div></div>
+      <div class="row2">
+        <div class="field"><label>ชั้น/ห้อง</label><input name="student_class" value="${esc(info.student_class || '')}" placeholder="เช่น ป.6/1" /></div>
+        <div class="field"><label>เลขที่</label><input name="student_no" value="${esc(info.student_no || '')}" placeholder="เช่น 12" /></div>
+      </div>
+      <div class="form-actions">
+        <button type="button" class="btn btn-outline" onclick="closeModal()">ยกเลิก</button>
+        <button type="submit" class="btn btn-primary">บันทึก</button>
+      </div>
+    </form>
+  `);
+  $('#meForm').addEventListener('submit', (e) => {
+    e.preventDefault();
+    const f = e.target;
+    const name = f.elements.student_name.value.trim();
+    f.elements.student_name.closest('.field').classList.toggle('invalid', !name);
+    if (!name) return;
+    saveStudentInfo({ student_name: name, student_class: f.elements.student_class.value.trim(), student_no: f.elements.student_no.value.trim() });
+    closeModal();
+    toast('บันทึกข้อมูลแล้ว', 'success');
+    renderMyPage();
+  });
+}
+
+/* ============================================================================
    12) หน้าบทเรียน — รายละเอียด + ปุ่มเข้าเรียน + ผลงานนักเรียน
    ============================================================================ */
 async function renderLesson(lessonId) {
@@ -762,6 +927,7 @@ async function renderLesson(lessonId) {
         <div class="lesson-actions">
           ${actionHtml}
           <button class="btn btn-outline teacher-only" onclick="openLessonForm('${esc(lesson.id)}','${esc(lesson.subject_id)}')">✏️ แก้ไขบทเรียน</button>
+          ${(isVideo && ytId) ? `<button class="btn btn-outline teacher-only" onclick="openQuizEditor('${esc(lesson.id)}')">📝 จัดการแบบทดสอบ</button>` : ''}
         </div>
       </div>
     </section>
@@ -888,6 +1054,8 @@ function initVideoPlayer(lesson, ytId, threshold) {
   const totalBuckets = 24;          // แบ่งวิดีโอเป็น 24 ช่วง ต้องดูผ่านจริงทุกช่วงถึงจะนับ
   const watched = new Set();
   let completed = isCompleted(lesson.id);   // เคยดูจบแล้ว (จำในเครื่อง)
+  let quizCache = null;             // คำถามแบบทดสอบ (null = ยังไม่โหลด, [] = ไม่มี)
+  let postWatchStarted = false;     // เข้าสู่ขั้นตอนหลังดูจบแล้วหรือยัง (กัน tick เรียกซ้ำ)
 
   const byId = (id) => document.getElementById(id);
   const pct = () => Math.round(watched.size / totalBuckets * 100);
@@ -934,15 +1102,104 @@ function initVideoPlayer(lesson, ytId, threshold) {
   }
 
   function onReachComplete() {
-    if (completed) return;
+    if (completed || postWatchStarted) return;
+    postWatchStarted = true;          // ★ เข้าขั้นตอนหลังดูจบแค่ครั้งเดียว
     if (!getStudentInfo().student_name) {
-      // ดูจบแล้วแต่ยังไม่กรอกชื่อ -> ขอให้กรอกแล้วบันทึก
+      // ดูจบแล้วแต่ยังไม่กรอกชื่อ -> ขอให้กรอกก่อน
       const gate = byId('videoGate'); const hint = byId('vpHint');
-      if (hint) hint.textContent = 'ดูจบแล้ว! กรอกชื่อเพื่อบันทึกและรับเกียรติบัตร';
-      if (gate) { gate.innerHTML = identityFormHtml('✅ บันทึกและรับเกียรติบัตร'); wireIdentityForm(() => finishComplete()); }
+      if (hint) hint.textContent = 'ดูจบแล้ว! กรอกชื่อเพื่อทำแบบทดสอบ/รับเกียรติบัตร';
+      if (gate) { gate.innerHTML = identityFormHtml('✅ ถัดไป'); wireIdentityForm(() => handleAfterWatch()); }
       return;
     }
-    finishComplete();
+    handleAfterWatch();
+  }
+
+  // หลังดูครบเกณฑ์ + รู้ชื่อแล้ว: มีแบบทดสอบไหม? มี -> ให้ทำก่อน / ไม่มี -> บันทึกดูจบเลย
+  async function handleAfterWatch() {
+    if (completed) return;
+    if (quizCache === null) {
+      const gate = byId('videoGate');
+      if (gate) gate.innerHTML = `<div class="vg-waiting">⏳ กำลังเตรียมแบบทดสอบ...</div>`;
+      try { quizCache = await apiGet('getQuiz', { lesson_id: lesson.id }); }
+      catch (e) { quizCache = []; }
+    }
+    if (quizCache && quizCache.length) renderQuiz();
+    else finishComplete();           // ไม่มีแบบทดสอบ = ดูจบถือว่าผ่าน
+  }
+
+  // แสดงแบบทดสอบ (สลับลำดับข้อ) ในกล่องใต้วิดีโอ
+  function renderQuiz(prevResult) {
+    const gate = byId('videoGate');
+    const hint = byId('vpHint');
+    if (hint) hint.textContent = 'ทำแบบทดสอบให้ผ่านเกณฑ์ เพื่อรับเกียรติบัตร';
+    if (!gate) return;
+
+    // สลับลำดับข้อ (ครั้งเดียวต่อรอบการแสดง) เพื่อลดการลอก
+    const qs = quizCache.slice().sort(() => Math.random() - 0.5);
+
+    const resultBanner = prevResult
+      ? `<div class="quiz-result fail">ยังไม่ผ่าน ได้ ${prevResult.correct}/${prevResult.total} (${prevResult.pct}%) — ต้องได้อย่างน้อย ${prevResult.passPct}% ลองใหม่อีกครั้งนะ 💪</div>`
+      : '';
+
+    gate.innerHTML = `
+      <div class="quiz-box">
+        <div class="quiz-title">📝 แบบทดสอบหลังเรียน (${qs.length} ข้อ)</div>
+        ${resultBanner}
+        <form id="quizForm">
+          ${qs.map((q, i) => `
+            <div class="quiz-q" data-qid="${esc(q.id)}">
+              <div class="quiz-qtext">${i + 1}. ${esc(q.question)}</div>
+              <div class="quiz-choices">
+                ${(q.choices || []).map((c, ci) => `
+                  <label class="quiz-choice">
+                    <input type="radio" name="q_${esc(q.id)}" value="${ci + 1}" />
+                    <span>${esc(c)}</span>
+                  </label>`).join('')}
+              </div>
+            </div>`).join('')}
+          <button type="submit" class="btn btn-primary btn-block">✅ ส่งคำตอบ</button>
+        </form>
+      </div>`;
+
+    const form = byId('quizForm');
+    form.addEventListener('submit', (e) => { e.preventDefault(); gradeQuiz(qs, form); });
+  }
+
+  async function gradeQuiz(qs, form) {
+    // รวบคำตอบ + ตรวจว่าตอบครบทุกข้อ
+    const answers = {};
+    let unanswered = 0;
+    qs.forEach(q => {
+      const sel = form.querySelector(`input[name="q_${q.id}"]:checked`);
+      if (sel) answers[q.id] = Number(sel.value); else unanswered++;
+    });
+    if (unanswered > 0) { toast('กรุณาตอบให้ครบทุกข้อ (ยังเหลือ ' + unanswered + ' ข้อ)', 'error'); return; }
+
+    const info = getStudentInfo();
+    const btn = form.querySelector('button[type=submit]');
+    btn.disabled = true; btn.textContent = 'กำลังตรวจ...';
+    try {
+      const res = await apiPost('submitQuiz', {
+        lesson_id: lesson.id,
+        student_name: info.student_name,
+        student_class: info.student_class || '',
+        student_no: info.student_no || '',
+        lesson_name: lesson.lesson_name || '',
+        answers
+      });
+      if (res.pass) {
+        completed = true;
+        markCompleted(lesson.id);
+        toast('ผ่านแล้ว! ได้ ' + res.correct + '/' + res.total + ' 🎉', 'success');
+        renderGate();
+      } else {
+        toast('ยังไม่ผ่าน ลองใหม่อีกครั้งนะ', 'error');
+        renderQuiz(res);          // แสดงคะแนน + ให้ทำใหม่ (สลับข้อใหม่)
+      }
+    } catch (err) {
+      toast(err.message, 'error');
+      btn.disabled = false; btn.textContent = '✅ ส่งคำตอบ';
+    }
   }
 
   async function finishComplete() {
@@ -1060,6 +1317,108 @@ function closeCertificate() {
   const o = document.getElementById('certOverlay');
   if (o) o.remove();
   document.body.classList.remove('cert-open');
+}
+
+/* ---- ตัวจัดการแบบทดสอบ (เฉพาะครู) ---- */
+const QUIZ_MAX = 10;   // จำนวนข้อสูงสุดต่อบทเรียน
+
+// สร้าง HTML ของคำถาม 1 ข้อในตัวแก้ไข (idx เริ่มจาก 0)
+function quizCardHtml(idx, q) {
+  q = q || {};
+  const ch = [q.choice1, q.choice2, q.choice3, q.choice4];
+  const correct = Number(q.correct) || 1;
+  const choiceRows = [0, 1, 2, 3].map(i => `
+    <div class="qe-choice">
+      <input type="radio" name="qe_correct_${idx}" value="${i + 1}" ${correct === (i + 1) ? 'checked' : ''} title="เลือกเป็นข้อที่ถูก" />
+      <input type="text" class="qe-choice-text" data-c="${i + 1}" value="${esc(ch[i] || '')}" placeholder="ตัวเลือก ${i + 1}${i < 2 ? ' (จำเป็น)' : ' (ถ้ามี)'}" />
+    </div>`).join('');
+  return `
+    <div class="qe-card" data-idx="${idx}">
+      <div class="qe-head">
+        <span class="qe-num">ข้อ <b class="qe-no">${idx + 1}</b></span>
+        <button type="button" class="btn btn-danger btn-sm" onclick="quizRemoveCard(this)">🗑️ ลบข้อนี้</button>
+      </div>
+      <textarea class="qe-question" rows="2" placeholder="พิมพ์คำถาม...">${esc(q.question || '')}</textarea>
+      <div class="qe-hint">เลือกปุ่มวงกลมหน้าตัวเลือกที่เป็น "คำตอบที่ถูก" • ต้องมีตัวเลือกอย่างน้อย 2 ข้อ</div>
+      ${choiceRows}
+    </div>`;
+}
+
+function quizRenumber() {
+  document.querySelectorAll('#qeList .qe-card').forEach((card, i) => {
+    card.dataset.idx = i;
+    const no = card.querySelector('.qe-no'); if (no) no.textContent = i + 1;
+    card.querySelectorAll('input[type=radio]').forEach(r => { r.name = 'qe_correct_' + i; });
+  });
+  const cnt = document.getElementById('qeCount');
+  if (cnt) cnt.textContent = document.querySelectorAll('#qeList .qe-card').length + '/' + QUIZ_MAX;
+  const addBtn = document.getElementById('qeAdd');
+  if (addBtn) addBtn.disabled = document.querySelectorAll('#qeList .qe-card').length >= QUIZ_MAX;
+}
+
+function quizRemoveCard(btn) {
+  const card = btn.closest('.qe-card');
+  if (card) card.remove();
+  quizRenumber();
+}
+
+function quizAddCard() {
+  const list = document.getElementById('qeList');
+  if (!list) return;
+  if (list.querySelectorAll('.qe-card').length >= QUIZ_MAX) { toast('เพิ่มได้สูงสุด ' + QUIZ_MAX + ' ข้อ', 'error'); return; }
+  list.insertAdjacentHTML('beforeend', quizCardHtml(list.querySelectorAll('.qe-card').length, {}));
+  quizRenumber();
+}
+
+async function openQuizEditor(lessonId) {
+  const lesson = findLessonInCache(lessonId) || {};
+  openModal('📝 จัดการแบบทดสอบ', `<div class="state"><div class="spinner"></div><p>กำลังโหลดคำถาม...</p></div>`);
+  let items = [];
+  try { items = await apiPost('getQuizEdit', { lesson_id: lessonId }); } catch (err) { toast(err.message, 'error'); }
+
+  const cards = (items && items.length) ? items.map((q, i) => quizCardHtml(i, q)).join('') : '';
+  $('#modalBody').innerHTML = `
+    <p class="reg-formhint">แบบทดสอบของบท "<b>${esc(lesson.lesson_name || '')}</b>" — นักเรียนต้องทำผ่านเกณฑ์หลังดูวิดีโอจบ ถึงจะได้เกียรติบัตร (เกณฑ์ผ่านปรับได้ในเมนูตั้งค่า)</p>
+    <div class="qe-toolbar">
+      <span class="qe-counter">จำนวนข้อ: <b id="qeCount">${(items ? items.length : 0)}/${QUIZ_MAX}</b></span>
+      <button type="button" class="btn btn-outline btn-sm" id="qeAdd" onclick="quizAddCard()">➕ เพิ่มคำถาม</button>
+    </div>
+    <div id="qeList">${cards}</div>
+    <div class="form-actions">
+      <button type="button" class="btn btn-outline" onclick="closeModal()">ยกเลิก</button>
+      <button type="button" class="btn btn-primary" id="qeSave" onclick="saveQuizEditor('${esc(lessonId)}')">💾 บันทึกแบบทดสอบ</button>
+    </div>`;
+  quizRenumber();
+  if (!items || !items.length) quizAddCard();   // เริ่มด้วยช่องว่าง 1 ข้อให้พิมพ์ได้เลย
+}
+
+async function saveQuizEditor(lessonId) {
+  const cards = Array.from(document.querySelectorAll('#qeList .qe-card'));
+  const items = [];
+  for (let i = 0; i < cards.length; i++) {
+    const card = cards[i];
+    const question = card.querySelector('.qe-question').value.trim();
+    const texts = Array.from(card.querySelectorAll('.qe-choice-text')).map(x => x.value.trim());
+    const correctEl = card.querySelector('input[type=radio]:checked');
+    const correct = correctEl ? Number(correctEl.value) : 0;
+
+    if (!question) { toast('ข้อ ' + (i + 1) + ': ยังไม่ได้พิมพ์คำถาม', 'error'); return; }
+    if (texts.filter(Boolean).length < 2) { toast('ข้อ ' + (i + 1) + ': ต้องมีตัวเลือกอย่างน้อย 2 ข้อ', 'error'); return; }
+    if (!correct || !texts[correct - 1]) { toast('ข้อ ' + (i + 1) + ': กรุณาเลือกคำตอบที่ถูก (และตัวเลือกนั้นต้องไม่ว่าง)', 'error'); return; }
+
+    items.push({ question, choice1: texts[0], choice2: texts[1], choice3: texts[2], choice4: texts[3], correct });
+  }
+
+  const btn = document.getElementById('qeSave');
+  btn.disabled = true; btn.textContent = 'กำลังบันทึก...';
+  try {
+    const res = await apiPost('saveQuiz', { lesson_id: lessonId, items });
+    closeModal();
+    toast('บันทึกแบบทดสอบแล้ว (' + (res.count || 0) + ' ข้อ)', 'success');
+  } catch (err) {
+    toast(err.message, 'error');
+    btn.disabled = false; btn.textContent = '💾 บันทึกแบบทดสอบ';
+  }
 }
 
 // ส่วนรายชื่อนักเรียนที่ลงทะเบียน (เฉพาะครู) — ตัวเนื้อหาจะถูกเติมโดย refreshRoster()
@@ -1200,6 +1559,11 @@ async function renderSettings() {
             <div class="hint">เกียรติบัตรใช้ชื่อครูจาก "เกี่ยวกับผู้สอน" ด้านล่าง</div>
           </div>
         </div>
+        <div class="field">
+          <label>เกณฑ์ผ่านแบบทดสอบ (%)</label>
+          <input type="number" name="quiz_pass_pct" min="0" max="100" step="1" value="${esc(s.quiz_pass_pct || 70)}" />
+          <div class="hint">ถ้าบทเรียนมีแบบทดสอบ นักเรียนต้องทำได้ถึง % นี้ถึงจะ "ดูจบ" และรับเกียรติบัตร — แนะนำ 70% (บทที่ไม่มีแบบทดสอบ ดูจบก็ผ่านเลย)</div>
+        </div>
 
         <div class="settings-divider">👩‍🏫 เกี่ยวกับผู้สอน</div>
         <div class="row2">
@@ -1259,6 +1623,7 @@ async function renderSettings() {
       register_school: f.elements.register_school.value.trim(),
       register_complete_pct: Math.max(50, Math.min(100, Number(f.elements.register_complete_pct.value) || 90)),
       cert_enabled: f.elements.cert_enabled.value,
+      quiz_pass_pct: Math.max(0, Math.min(100, Number(f.elements.quiz_pass_pct.value) || 70)),
       about_name: f.elements.about_name.value.trim(),
       about_role: f.elements.about_role.value.trim(),
       about_photo: f.elements.about_photo.value.trim(),
