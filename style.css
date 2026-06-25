@@ -117,6 +117,8 @@ img { max-width: 100%; display: block; }
 .teacher-only { display: none !important; }
 body.is-teacher .teacher-only { display: inline-flex !important; }
 body.is-teacher .teacher-banner { display: block !important; }
+/* แสดงเฉพาะตอนไม่ได้เป็นครู (สำหรับนักเรียน/บุคคลทั่วไป) */
+body.is-teacher .student-only { display: none !important; }
 
 /* บนจอเล็ก ซ่อนข้อความปุ่ม เหลือแต่ไอคอน */
 @media (max-width: 560px) {
@@ -616,6 +618,68 @@ body.is-teacher .announce-tools { display: flex; }
    ส่วนท้าย
    ============================================================================ */
 .footer { text-align: center; padding: 26px 20px; color: var(--ink-soft); border-top: 1px solid var(--line); background: rgba(255,255,255,.5); font-size: .92rem; }
+
+/* ============================================================================
+   ★ แบบทดสอบหลังดูวิดีโอ
+   ============================================================================ */
+/* ฝั่งนักเรียน: กล่องทำแบบทดสอบ */
+.quiz-box { }
+.quiz-title { font-family: 'Kanit', sans-serif; font-weight: 600; font-size: 1.05rem; margin-bottom: 12px; }
+.quiz-result { border-radius: var(--radius-sm); padding: 10px 14px; margin-bottom: 14px; font-size: .92rem; }
+.quiz-result.fail { background: #fff4e5; color: #b45309; border: 1px solid #fed7aa; }
+.quiz-q { background: var(--bg-soft, #f7f9fc); border: 1px solid var(--line); border-radius: var(--radius-sm); padding: 14px 16px; margin-bottom: 12px; }
+.quiz-qtext { font-weight: 600; margin-bottom: 10px; line-height: 1.5; }
+.quiz-choices { display: flex; flex-direction: column; gap: 8px; }
+.quiz-choice { display: flex; align-items: center; gap: 10px; padding: 9px 12px; border: 1.5px solid var(--line); border-radius: var(--radius-sm); cursor: pointer; transition: border-color .15s, background .15s; }
+.quiz-choice:hover { border-color: var(--primary); }
+.quiz-choice input { width: 18px; height: 18px; flex-shrink: 0; accent-color: var(--primary); }
+.quiz-choice:has(input:checked) { border-color: var(--primary); background: var(--primary-soft); }
+
+/* ฝั่งครู: ตัวแก้ไขแบบทดสอบ (อยู่ในกล่อง modal) */
+.qe-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 12px; }
+.qe-counter { font-size: .9rem; color: var(--ink-soft); }
+.qe-card { border: 1px solid var(--line); border-radius: var(--radius-sm); padding: 14px; margin-bottom: 12px; background: var(--card); }
+.qe-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
+.qe-num { font-family: 'Kanit', sans-serif; font-weight: 600; }
+.qe-question { width: 100%; resize: vertical; margin-bottom: 6px; }
+.qe-hint { font-size: .8rem; color: var(--ink-soft); margin-bottom: 10px; }
+.qe-choice { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
+.qe-choice input[type=radio] { width: 20px; height: 20px; flex-shrink: 0; accent-color: #22c55e; }
+.qe-choice-text { flex: 1; }
+
+/* ============================================================================
+   ★ ค้นหา + กรองตามระดับชั้น (หน้าแรก)
+   ============================================================================ */
+.filter-bar { display: flex; flex-wrap: wrap; gap: 10px 14px; align-items: center; margin: 0 0 20px; }
+.search-input { flex: 1 1 240px; min-width: 200px; padding: 11px 14px; border: 1.5px solid var(--line); border-radius: 999px; font-family: inherit; font-size: .95rem; background: var(--card); }
+.search-input:focus { outline: none; border-color: var(--primary); box-shadow: 0 0 0 3px var(--primary-soft); }
+.grade-chips { display: flex; flex-wrap: wrap; gap: 8px; }
+.chip { border: 1.5px solid var(--line); background: var(--card); color: var(--ink); border-radius: 999px; padding: 7px 16px; font-family: 'Kanit', sans-serif; font-size: .9rem; cursor: pointer; transition: all .15s; }
+.chip:hover { border-color: var(--primary); }
+.chip.active { background: var(--primary); border-color: var(--primary); color: #fff; }
+
+/* ============================================================================
+   ★ หน้า "ของฉัน" — บทที่ดูจบ + เกียรติบัตร
+   ============================================================================ */
+.mine-hero { display: flex; align-items: center; gap: 18px; background: linear-gradient(135deg, var(--primary-soft), var(--card)); border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow); padding: 22px 24px; margin-bottom: 26px; }
+.mine-hero-ic { font-size: 2.8rem; flex-shrink: 0; }
+.mine-hero-info { flex: 1; }
+.mine-hero-info h1 { font-family: 'Kanit', sans-serif; font-size: 1.5rem; margin-bottom: 2px; }
+.mine-who { color: var(--ink-soft); margin-bottom: 10px; }
+.mine-stat { text-align: center; flex-shrink: 0; padding-left: 16px; }
+.mine-stat-num { font-family: 'Kanit', sans-serif; font-weight: 700; font-size: 2.2rem; color: var(--primary); line-height: 1; }
+.mine-stat-label { color: var(--ink-soft); font-size: .85rem; margin-top: 2px; }
+@media (max-width: 560px) {
+  .mine-hero { flex-wrap: wrap; }
+  .mine-stat { padding-left: 0; }
+}
+.mine-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 14px; }
+.mine-card { display: flex; align-items: center; gap: 12px; background: var(--card); border: 1px solid var(--line); border-left: 5px solid #22c55e; border-radius: var(--radius-sm); box-shadow: var(--shadow); padding: 14px 16px; animation: cardIn .5s both; }
+.mine-badge { font-size: 1.5rem; flex-shrink: 0; }
+.mine-main { flex: 1; min-width: 0; }
+.mine-lesson { font-family: 'Kanit', sans-serif; font-weight: 600; }
+.mine-sub { color: var(--ink-soft); font-size: .85rem; }
+.mine-actions { display: flex; flex-direction: column; gap: 6px; flex-shrink: 0; }
 
 /* ============================================================================
    เคารพการตั้งค่า "ลดการเคลื่อนไหว" ของผู้ใช้ (เพื่อการเข้าถึง)
