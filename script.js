@@ -326,39 +326,41 @@ async function router() {
 }
 window.addEventListener('hashchange', router);
 
-// โหลด settings + subjects (ครั้งแรก หรือบังคับโหลดใหม่)
+// โหลดข้อมูลหลักทั้งหมด "ในคำขอเดียว" (settings + subjects + บทเรียนทั้งหมด + ประกาศ + สถิติ + ผลงานล่าสุด)
+// แล้วแคชไว้ เปลี่ยนหน้าวิชา/บทเรียนได้ทันทีโดยไม่ต้องยิงซ้ำ
 async function loadCore(force) {
-  if (force || !state.subjects.length || !Object.keys(state.settings).length) {
-    const [settings, subjects] = await Promise.all([apiGet('getSettings'), apiGet('getSubjects')]);
-    state.settings = settings || {};
-    state.subjects = (subjects || []).sort(byOrder);
-    applyTheme();
-  }
+  if (!force && state._loaded) return;
+  const data = await apiGet('getBootstrap');
+  state.settings = data.settings || {};
+  state.subjects = (data.subjects || []).sort(byOrder);
+  state.announcements = Array.isArray(data.announcements) ? data.announcements : [];
+  state.stats = data.stats || null;
+  state.recentWorks = Array.isArray(data.recentWorks) ? data.recentWorks : [];
+
+  // จัดบทเรียนทั้งหมดเข้า cache แยกตามวิชา (เพื่อให้หน้า วิชา/บทเรียน ใช้ได้ทันที)
+  state.lessonsCache = {};
+  (data.lessons || []).forEach(l => {
+    (state.lessonsCache[l.subject_id] = state.lessonsCache[l.subject_id] || []).push(l);
+  });
+  Object.keys(state.lessonsCache).forEach(sid => state.lessonsCache[sid].sort(byOrder));
+
+  state._loaded = true;
+  applyTheme();
 }
+
+// บังคับให้โหลดข้อมูลใหม่รอบหน้า (เรียกหลังครูเพิ่ม/แก้/ลบ)
+function invalidateCache() { state._loaded = false; }
 
 /* ============================================================================
    10) หน้าแรก — Hero + ตารางวิชา
    ============================================================================ */
 async function renderHome() {
-  loaderSet(12);                     // แจ้งหน้าจอโหลด: เริ่มโหลดแล้ว
+  loaderSet(15);                     // แจ้งหน้าจอโหลด: เริ่มโหลดแล้ว
   app.innerHTML = viewSkeleton();
   try {
-    await loadCore(true);
-    loaderSet(58);                   // โหลดข้อมูลหลัก (วิชา + ตั้งค่า) เสร็จ
+    await loadCore(true);            // ★ ยิงครั้งเดียวได้ครบทุกอย่าง (เร็วขึ้นมาก)
+    loaderSet(92);
   } catch (err) { app.innerHTML = viewError(err.message); loaderDone(); return; }
-
-  // โหลดข้อมูลเสริม: ประชาสัมพันธ์ + สถิติ + ผลงานล่าสุด
-  // ใช้ allSettled เพื่อว่า ถ้าส่วนใดโหลดไม่ได้ (เช่นยังไม่ได้ deploy Code.gs ใหม่)
-  // ก็แค่ซ่อนส่วนนั้น ไม่ทำให้ทั้งหน้าพัง
-  const [annRes, homeRes] = await Promise.allSettled([
-    apiGet('getAnnouncements'),
-    apiGet('getHome')
-  ]);
-  loaderSet(90);                     // โหลดข้อมูลเสริมเสร็จ
-  state.announcements = (annRes.status === 'fulfilled' && Array.isArray(annRes.value)) ? annRes.value : [];
-  const home = (homeRes.status === 'fulfilled') ? homeRes.value : null;
-  state.stats = (home && home.stats) ? home.stats : null;
-  state.recentWorks = (home && Array.isArray(home.recentWorks)) ? home.recentWorks : [];
 
   const s = state.settings;
   // รูปปกหน้าแรก: รองรับได้ถึง 3 รูป (สลับอัตโนมัติ) เก็บใน settings 3 คีย์
@@ -638,19 +640,17 @@ function goSubject(id) { location.hash = 'subject=' + id; }
    11) หน้าวิชา — แสดงบทเรียนของวิชานั้น
    ============================================================================ */
 async function renderSubject(subjectId) {
-  loaderSet(20);
+  loaderSet(25);
   app.innerHTML = viewSkeleton();
   try {
-    await loadCore();
-    loaderSet(65);
-    const lessons = await apiGet('getLessons', { subject_id: subjectId });
-    state.lessonsCache[subjectId] = (lessons || []).sort(byOrder);
+    await loadCore();              // ใช้แคชถ้ามีอยู่แล้ว (ปกติไม่ยิงซ้ำ)
+    loaderSet(90);
   } catch (err) { app.innerHTML = viewError(err.message); loaderDone(); return; }
 
   const sub = state.subjects.find(x => x.id === subjectId);
   if (!sub) { app.innerHTML = viewEmpty('🔍', 'ไม่พบวิชานี้', 'อาจถูกลบไปแล้ว'); loaderDone(); return; }
 
-  const lessons = state.lessonsCache[subjectId].filter(x => isTeacher() || (x.status || 'active') === 'active');
+  const lessons = (state.lessonsCache[subjectId] || []).filter(x => isTeacher() || (x.status || 'active') === 'active');
 
   let cardsHtml;
   if (!lessons.length) {
@@ -698,26 +698,17 @@ function goLesson(id) { location.hash = 'lesson=' + id; }
    12) หน้าบทเรียน — รายละเอียด + ปุ่มเข้าเรียน + ผลงานนักเรียน
    ============================================================================ */
 async function renderLesson(lessonId) {
-  loaderSet(20);
+  loaderSet(25);
   app.innerHTML = viewSkeleton();
   let lesson, works;
   try {
-    await loadCore();
-    loaderSet(50);
-    // หาบทเรียน: ลองจาก cache ก่อน ไม่มีค่อยโหลดทุกวิชา
+    await loadCore();                       // โหลดบทเรียนทั้งหมดมาแล้ว (แคช) — ไม่ต้องวนยิงทีละวิชา
+    loaderSet(55);
     lesson = findLessonInCache(lessonId);
-    if (!lesson) {
-      // โหลดบทเรียนของทุกวิชาเพื่อหา (กรณีเข้าลิงก์ตรง)
-      for (const sub of state.subjects) {
-        const ls = await apiGet('getLessons', { subject_id: sub.id });
-        state.lessonsCache[sub.id] = (ls || []).sort(byOrder);
-      }
-      lesson = findLessonInCache(lessonId);
-    }
     if (!lesson) { app.innerHTML = viewEmpty('🔍', 'ไม่พบบทเรียนนี้', 'อาจถูกลบไปแล้ว'); loaderDone(); return; }
-    loaderSet(80);
-    works = await apiGet('getWorks', { lesson_id: lessonId });
+    works = await apiGet('getWorks', { lesson_id: lessonId });   // ยิงเฉพาะ "ผลงาน" ของบทนี้
     state.worksCache[lessonId] = works || [];
+    loaderSet(88);
   } catch (err) { app.innerHTML = viewError(err.message); loaderDone(); return; }
 
   const sub = state.subjects.find(x => x.id === lesson.subject_id) || {};
@@ -1396,7 +1387,7 @@ function openSubjectForm(id) {
       cover_image: f.elements.cover_image.value.trim(),
       order: Number(f.elements.order.value) || 0, status: f.elements.status.value
     };
-    await submitForm(f, () => apiPost('saveSubject', { item }), 'บันทึกวิชาแล้ว', () => { state.subjects = []; renderHome(); });
+    await submitForm(f, () => apiPost('saveSubject', { item }), 'บันทึกวิชาแล้ว', () => { invalidateCache(); renderHome(); });
   });
 }
 
@@ -1472,7 +1463,7 @@ function openLessonForm(id, subjectId) {
       order: Number(f.elements.order.value) || 0, status: f.elements.status.value
     };
     await submitForm(f, () => apiPost('saveLesson', { item }), 'บันทึกบทเรียนแล้ว', () => {
-      state.lessonsCache[item.subject_id] = []; // ล้าง cache ให้โหลดใหม่
+      invalidateCache();        // ให้โหลดบทเรียนชุดใหม่รอบหน้า
       renderSubject(item.subject_id);
     });
   });
@@ -1555,7 +1546,7 @@ function openAnnounceForm(id) {
       status: f.elements.status.value
     };
     await submitForm(f, () => apiPost('saveAnnounce', { item }), 'บันทึกประกาศแล้ว', () => {
-      state.announcements = []; renderHome();
+      invalidateCache(); renderHome();
     });
   });
 }
@@ -1607,7 +1598,7 @@ function confirmDeleteSubject(id) {
   openConfirm('ต้องการลบวิชานี้ใช่ไหม?', sub.subject_name + ' ' + (sub.grade || ''),
     'บทเรียนและผลงานทั้งหมดในวิชานี้จะถูกลบไปด้วย', async () => {
       await apiPost('deleteSubject', { id });
-      state.subjects = []; renderHome();
+      invalidateCache(); renderHome();
     });
 }
 function confirmDeleteLesson(id, subjectId) {
@@ -1615,7 +1606,7 @@ function confirmDeleteLesson(id, subjectId) {
   openConfirm('ต้องการลบบทเรียนนี้ใช่ไหม?', lesson.lesson_name || '',
     'ผลงานนักเรียนในบทเรียนนี้จะถูกลบไปด้วย', async () => {
       await apiPost('deleteLesson', { id });
-      state.lessonsCache[subjectId] = []; renderSubject(subjectId);
+      invalidateCache(); renderSubject(subjectId);
     });
 }
 function confirmDeleteWork(id, lessonId) {
@@ -1629,7 +1620,7 @@ function confirmDeleteAnnounce(id) {
   const a = state.announcements.find(x => x.id === id) || {};
   openConfirm('ต้องการลบประกาศนี้ใช่ไหม?', a.title || '', '', async () => {
     await apiPost('deleteAnnounce', { id });
-    state.announcements = []; renderHome();
+    invalidateCache(); renderHome();
   });
 }
 
