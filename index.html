@@ -24,7 +24,7 @@
   <link href="https://fonts.googleapis.com/css2?family=Kanit:wght@500;600;700&family=Sarabun:wght@400;500;600&display=swap" rel="stylesheet" />
 
   <!-- ไฟล์สไตล์ของเรา -->
-  <link rel="stylesheet" href="style.css?v=13" />
+  <link rel="stylesheet" href="style.css?v=15" />
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📚</text></svg>" />
 
   <!-- ===================== สไตล์ของหน้าจอโหลด (ฝังในไฟล์ เพื่อให้แสดงทันที) ===================== -->
@@ -259,6 +259,9 @@
 
     <div class="topbar-actions">
       <!-- ปุ่มเหล่านี้จะแสดง/ซ่อนตามสถานะการเข้าสู่ระบบ (จัดการโดย script.js) -->
+      <button class="btn btn-ghost student-only" id="btnMe" title="ผลงาน/เกียรติบัตรของฉัน">
+        🎓 <span class="btn-label">ของฉัน</span>
+      </button>
       <button class="btn btn-ghost teacher-only" id="btnSettings" title="ตั้งค่าเว็บไซต์">
         ⚙️ <span class="btn-label">ตั้งค่าเว็บ</span>
       </button>
@@ -297,6 +300,6 @@
   <div class="toast-wrap" id="toastWrap"></div>
 
   <!-- ไฟล์ JavaScript หลัก (ใส่ไว้ท้ายสุดเพื่อให้โหลดหน้าก่อน) -->
-  <script src="script.js?v=13"></script>
+  <script src="script.js?v=15"></script>
 </body>
 </html>
