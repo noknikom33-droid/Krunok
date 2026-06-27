@@ -319,6 +319,13 @@ body.is-teacher .card-tools { display: flex; }
 body.is-teacher .work-card .work-tools { display:flex; }
 .work-card .work-lesson { color: var(--primary); font-size:.8rem; margin-top:4px; }
 
+/* ★ ผลงานที่นักเรียนส่งมา (รออนุมัติ) — เห็นเฉพาะครู */
+.work-card.is-pending { border:1.5px dashed #f59e0b; box-shadow: none; }
+.work-card .work-img { position: relative; }
+.work-pending-tag { position:absolute; top:8px; left:8px; z-index:2; background: rgba(245,158,11,.95); color:#fff; font-family:'Kanit',sans-serif; font-weight:600; font-size:.72rem; padding:3px 9px; border-radius:999px; }
+.pending-count { font-family:'Kanit',sans-serif; font-size:.78rem; font-weight:600; color:#b45309; background:#fff4e5; border:1px solid #fed7aa; padding:2px 10px; border-radius:999px; vertical-align:middle; margin-left:6px; }
+.sw-filename { font-size:.85rem; color: var(--ink-soft); align-self:center; }
+
 /* วิดีโอ YouTube ฝังในหน้า (responsive 16:9) */
 .video-embed {
   position: relative; width: 100%; aspect-ratio: 16 / 9;
@@ -680,6 +687,36 @@ body.is-teacher .announce-tools { display: flex; }
 .mine-lesson { font-family: 'Kanit', sans-serif; font-weight: 600; }
 .mine-sub { color: var(--ink-soft); font-size: .85rem; }
 .mine-actions { display: flex; flex-direction: column; gap: 6px; flex-shrink: 0; }
+
+/* ============================================================================
+   🎮 เกมเสริมการเรียนรู้
+   ============================================================================ */
+.games-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 16px; }
+.game-card { background: var(--card); border: 1px solid var(--line); border-top: 4px solid var(--gc, var(--accent)); border-radius: var(--radius-sm); overflow: hidden; box-shadow: var(--shadow); display: flex; flex-direction: column; animation: cardIn .5s both; transition: transform .15s, box-shadow .15s; }
+.game-card:hover { transform: translateY(-3px); box-shadow: var(--shadow-lg); }
+.game-card.inactive { opacity: .55; }
+.game-cover { aspect-ratio: 16/10; background: color-mix(in srgb, var(--gc, var(--accent)) 14%, white); display: flex; align-items: center; justify-content: center; overflow: hidden; cursor: pointer; }
+.game-cover img { width: 100%; height: 100%; object-fit: cover; }
+.game-cover .game-emoji { font-size: 3rem; }
+.game-body { padding: 12px 14px 14px; display: flex; flex-direction: column; gap: 6px; flex: 1; }
+.game-tags { display: flex; flex-wrap: wrap; gap: 6px; }
+.game-cat { background: var(--gc, var(--accent)); color: #fff; font-family: 'Kanit', sans-serif; font-weight: 600; font-size: .72rem; padding: 2px 9px; border-radius: 999px; }
+.game-grade { background: var(--primary-soft); color: var(--primary); font-size: .72rem; font-weight: 600; padding: 2px 9px; border-radius: 999px; }
+.game-title { font-family: 'Kanit', sans-serif; font-weight: 600; font-size: 1rem; }
+.game-desc { color: var(--ink-soft); font-size: .85rem; line-height: 1.45; flex: 1; }
+.game-actions { margin-top: 4px; }
+.game-actions .btn { width: 100%; justify-content: center; }
+.game-tools { display: none; gap: 6px; margin-top: 6px; }
+body.is-teacher .game-tools { display: flex; }
+
+/* ตัวเล่นเกมแบบฝังเต็มจอ */
+.game-overlay { position: fixed; inset: 0; z-index: 300; background: #0b1020; display: flex; flex-direction: column; }
+.game-bar { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 10px 14px; background: #111a2e; color: #fff; flex-shrink: 0; }
+.game-bar-title { font-family: 'Kanit', sans-serif; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.game-bar-actions { display: flex; gap: 8px; flex-shrink: 0; }
+.game-frame { flex: 1; width: 100%; border: 0; background: #fff; }
+.game-fallback { position: absolute; bottom: 8px; left: 0; right: 0; text-align: center; color: rgba(255,255,255,.6); font-size: .8rem; pointer-events: none; }
+body.game-open { overflow: hidden; }
 
 /* ============================================================================
    เคารพการตั้งค่า "ลดการเคลื่อนไหว" ของผู้ใช้ (เพื่อการเข้าถึง)
