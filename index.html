@@ -15,8 +15,18 @@
 <html lang="th">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
   <title>ห้องเรียนออนไลน์</title>
+
+  <!-- ===== ติดตั้งเป็นแอป (PWA) ===== -->
+  <link rel="manifest" href="manifest.json" />
+  <meta name="theme-color" content="#4f8cff" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <!-- รองรับ iPhone/iPad: เปิดเต็มจอเหมือนแอป + ไอคอนบนหน้าจอโฮม -->
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+  <meta name="apple-mobile-web-app-title" content="ห้องเรียนออนไลน์" />
+  <link rel="apple-touch-icon" href="apple-touch-icon.png" />
 
   <!-- ฟอนต์ไทยจาก Google Fonts: Kanit (หัวข้อ) + Sarabun (เนื้อหา) -->
   <link rel="preconnect" href="https://fonts.googleapis.com" />
@@ -24,7 +34,8 @@
   <link href="https://fonts.googleapis.com/css2?family=Kanit:wght@500;600;700&family=Sarabun:wght@400;500;600&display=swap" rel="stylesheet" />
 
   <!-- ไฟล์สไตล์ของเรา -->
-  <link rel="stylesheet" href="style.css?v=15" />
+  <link rel="stylesheet" href="style.css?v=18" />
+  <link rel="icon" href="favicon-64.png" />
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📚</text></svg>" />
 
   <!-- ===================== สไตล์ของหน้าจอโหลด (ฝังในไฟล์ เพื่อให้แสดงทันที) ===================== -->
@@ -300,6 +311,17 @@
   <div class="toast-wrap" id="toastWrap"></div>
 
   <!-- ไฟล์ JavaScript หลัก (ใส่ไว้ท้ายสุดเพื่อให้โหลดหน้าก่อน) -->
-  <script src="script.js?v=15"></script>
+  <script src="script.js?v=18"></script>
+
+  <!-- ===================== ลงทะเบียน Service Worker (ทำให้ติดตั้งเป็นแอปได้) ===================== -->
+  <script>
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', function () {
+        navigator.serviceWorker.register('sw.js').catch(function (err) {
+          console.log('ลงทะเบียน Service Worker ไม่สำเร็จ:', err);
+        });
+      });
+    }
+  </script>
 </body>
 </html>
