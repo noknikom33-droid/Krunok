@@ -18,6 +18,7 @@ const state = {
   settings: {},
   subjects: [],
   announcements: [],  // ประชาสัมพันธ์
+  games: [],          // เกมเสริมการเรียนรู้
   stats: null,        // สถิติสรุปหน้าแรก
   recentWorks: [],    // ผลงานนักเรียนล่าสุด
   lessonsCache: {},   // เก็บบทเรียนแยกตาม subject_id
@@ -101,7 +102,31 @@ function formatThaiDate(val) {
   } catch (e) { return String(val); }
 }
 
-// แปลงค่าวันที่ให้อยู่ในรูป yyyy-MM-dd สำหรับช่อง <input type="date">
+// แปลงวัน "พร้อมเวลา" เป็นไทย เช่น "24 มิถุนายน 2569 เวลา 21.28 น."
+// รองรับทั้งข้อความ ISO (...T14:28:00.000Z), "2026-06-24 21:28" หรือออบเจกต์ Date
+function formatThaiDateTime(val) {
+  if (!val) return '';
+  const str = String(val);
+  const months = ['มกราคม', 'กุมภาพันธ์', 'มีนาคม', 'เมษายน', 'พฤษภาคม', 'มิถุนายน', 'กรกฎาคม', 'สิงหาคม', 'กันยายน', 'ตุลาคม', 'พฤศจิกายน', 'ธันวาคม'];
+
+  // กรณีเป็นข้อความ "yyyy-MM-dd HH:mm" ที่เป็นเวลาไทยอยู่แล้ว (ไม่มีโซนเวลา/Z) -> ใช้ค่าตรง ๆ ไม่แปลงโซน
+  const m = str.match(/^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})/);
+  if (m && !/[zZ]|[+\-]\d\d:?\d\d$/.test(str)) {
+    return parseInt(m[3], 10) + ' ' + months[parseInt(m[2], 10) - 1] + ' ' + (parseInt(m[1], 10) + 543) +
+           ' เวลา ' + m[4] + '.' + m[5] + ' น.';
+  }
+
+  // กรณีเป็น ISO/Date -> แปลงเป็นเวลาประเทศไทย
+  const d = new Date(val);
+  if (isNaN(d.getTime())) return str;
+  try {
+    const parts = new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Bangkok', year: 'numeric', month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false }).formatToParts(d);
+    const get = (t) => { const p = parts.find(x => x.type === t); return p ? p.value : ''; };
+    let h = get('hour'); if (h === '24') h = '00';
+    return parseInt(get('day'), 10) + ' ' + months[parseInt(get('month'), 10) - 1] + ' ' + (parseInt(get('year'), 10) + 543) +
+           ' เวลา ' + h + '.' + get('minute') + ' น.';
+  } catch (e) { return str; }
+}
 function toDateInputValue(val) {
   if (!val) return '';
   const d = new Date(val);
@@ -295,6 +320,7 @@ $('#btnLogin').onclick = openLogin;
 $('#btnLogout').onclick = logout;
 $('#btnSettings').onclick = () => { location.hash = 'view=settings'; };
 $('#btnMe').onclick = () => { location.hash = 'view=me'; };
+$('#btnGames').onclick = () => { location.hash = 'view=games'; };
 $('#brandLink').onclick = (e) => { e.preventDefault(); location.hash = ''; };
 
 /* ============================================================================
@@ -322,6 +348,7 @@ async function router() {
   const params = new URLSearchParams(location.hash.slice(1));
   if (params.get('view') === 'settings') return renderSettings();
   if (params.get('view') === 'me') return renderMyPage();
+  if (params.get('view') === 'games') return renderGamesPage();
   if (params.get('lesson')) return renderLesson(params.get('lesson'));
   if (params.get('subject')) return renderSubject(params.get('subject'));
   return renderHome();
@@ -338,6 +365,7 @@ async function loadCore(force) {
   state.announcements = Array.isArray(data.announcements) ? data.announcements : [];
   state.stats = data.stats || null;
   state.recentWorks = Array.isArray(data.recentWorks) ? data.recentWorks : [];
+  state.games = (data.games || []).sort(byOrder);
 
   // จัดบทเรียนทั้งหมดเข้า cache แยกตามวิชา (เพื่อให้หน้า วิชา/บทเรียน ใช้ได้ทันที)
   state.lessonsCache = {};
@@ -422,6 +450,7 @@ async function renderHome() {
     ${filterBar}
     <div id="subjectGrid"></div>
 
+    ${gamesSummarySection()}
     ${featuredWorksSection()}
     ${aboutSection()}
   `;
@@ -699,6 +728,237 @@ function subjectCard(sub, i) {
 function goSubject(id) { location.hash = 'subject=' + id; }
 
 /* ============================================================================
+   10.5) 🎮 เกมเสริมการเรียนรู้ (แยกจากหมวดวิชา)
+   ============================================================================ */
+
+// หมวดเกมแนะนำ (ครูพิมพ์เพิ่มเองได้) + สีประจำหมวด
+const GAME_CATEGORIES = ['คณิตศาสตร์', 'ภาษาไทย', 'ภาษาอังกฤษ', 'วิทยาศาสตร์', 'ตรรกะ/คิดเลขเร็ว', 'ทั่วไป'];
+function gameCatColor(cat) {
+  const map = {
+    'คณิตศาสตร์': '#4f8cff', 'ภาษาไทย': '#ef4444', 'ภาษาอังกฤษ': '#a855f7',
+    'วิทยาศาสตร์': '#22c55e', 'ตรรกะ/คิดเลขเร็ว': '#f59e0b', 'ทั่วไป': '#64748b'
+  };
+  return map[cat] || '#ec4899';
+}
+
+// รายชื่อหมวดที่มีจริงในข้อมูล (ไว้ทำปุ่มกรอง)
+function gameCategoryList() {
+  const set = [];
+  state.games.forEach(g => { const c = String(g.category || '').trim(); if (c && !set.includes(c)) set.push(c); });
+  return set;
+}
+
+// การ์ดสรุปเกมบนหน้าแรก (โชว์ไม่กี่เกม + ลิงก์ไปหน้าเกมทั้งหมด)
+function gamesSummarySection() {
+  const games = state.games.filter(g => isTeacher() || (g.status || 'active') === 'active');
+  if (!games.length && !isTeacher()) return '';   // ไม่มีเกม + เป็นนักเรียน = ซ่อน
+
+  const head = `<div class="section-head">
+      <h2>🎮 เกมเสริมการเรียนรู้</h2>
+      <a class="btn btn-outline btn-sm" href="#view=games">ดูเกมทั้งหมด →</a>
+    </div>`;
+  if (!games.length) {
+    return head + viewEmpty('🕹️', 'ยังไม่มีเกม', 'กดปุ่ม "ดูเกมทั้งหมด" แล้วเพิ่มเกมแรกได้เลย');
+  }
+  const show = games.slice(0, 6);
+  return `${head}<div class="games-grid">${show.map((g, i) => gameCard(g, i)).join('')}</div>`;
+}
+
+// หน้าเกมเต็ม + ปุ่มกรองตามหมวด
+async function renderGamesPage() {
+  loaderSet(25);
+  app.innerHTML = viewSkeleton();
+  try { await loadCore(); loaderSet(90); }
+  catch (err) { app.innerHTML = viewError(err.message); loaderDone(); return; }
+
+  const cats = gameCategoryList();
+  const filterBar = `
+    <div class="filter-bar">
+      <input id="gameSearch" class="search-input" type="search" placeholder="🔍 ค้นหาเกม..." value="${esc(gameSearch)}" />
+      ${cats.length > 1 ? `<div class="grade-chips" id="gameChips">
+        <button class="chip ${gameCat === '' ? 'active' : ''}" data-cat="">ทั้งหมด</button>
+        ${cats.map(c => `<button class="chip ${gameCat === c ? 'active' : ''}" data-cat="${esc(c)}">${esc(c)}</button>`).join('')}
+      </div>` : ''}
+    </div>`;
+
+  app.innerHTML = `
+    <nav class="crumbs"><a href="#">หน้าหลัก</a><span class="sep">›</span><span>เกมเสริม</span></nav>
+    <div class="section-head">
+      <h2>🎮 เกมเสริมการเรียนรู้</h2>
+      <button class="btn btn-primary teacher-only" onclick="openGameForm()">➕ เพิ่มเกม</button>
+    </div>
+    ${filterBar}
+    <div id="gamesGrid"></div>
+  `;
+  loaderDone();
+  setupGamesFilter();
+}
+
+let gameSearch = '';   // คำค้นในหน้าเกม
+let gameCat = '';      // หมวดที่เลือก ('' = ทั้งหมด)
+
+function setupGamesFilter() {
+  const search = document.getElementById('gameSearch');
+  if (search) search.addEventListener('input', () => { gameSearch = search.value; renderGamesGrid(); });
+  document.querySelectorAll('#gameChips .chip').forEach(chip => {
+    chip.addEventListener('click', () => {
+      gameCat = chip.dataset.cat || '';
+      document.querySelectorAll('#gameChips .chip').forEach(c => c.classList.toggle('active', c === chip));
+      renderGamesGrid();
+    });
+  });
+  renderGamesGrid();
+}
+
+function renderGamesGrid() {
+  const box = document.getElementById('gamesGrid');
+  if (!box) return;
+  const q = gameSearch.trim().toLowerCase();
+  let list = state.games.filter(g => isTeacher() || (g.status || 'active') === 'active');
+  if (gameCat) list = list.filter(g => String(g.category || '').trim() === gameCat);
+  if (q) list = list.filter(g =>
+    String(g.title || '').toLowerCase().includes(q) ||
+    String(g.description || '').toLowerCase().includes(q) ||
+    String(g.category || '').toLowerCase().includes(q));
+
+  if (!list.length) {
+    box.innerHTML = viewEmpty('🎮', 'ไม่พบเกม', isTeacher() ? 'กดปุ่ม "เพิ่มเกม" เพื่อเริ่ม' : 'ลองค้นด้วยคำอื่น หรือเลือกหมวดอื่น');
+    return;
+  }
+  box.innerHTML = `<div class="games-grid">${list.map((g, i) => gameCard(g, i)).join('')}</div>`;
+}
+
+// การ์ดเกม 1 ใบ
+function gameCard(g, i) {
+  const cover = imgUrl(g.cover_image);
+  const col = gameCatColor(g.category);
+  const coverHtml = cover
+    ? `<img src="${esc(cover)}" alt="" loading="lazy" onerror="this.parentNode.classList.add('noimg');this.remove()" />`
+    : '<span class="game-emoji">🎮</span>';
+  const tags = `${g.category ? `<span class="game-cat" style="--gc:${esc(col)}">${esc(g.category)}</span>` : ''}${g.grade ? `<span class="game-grade">${esc(g.grade)}</span>` : ''}`;
+  const inactive = (g.status || 'active') !== 'active' ? ' inactive' : '';
+  return `
+    <div class="game-card${inactive}" style="--gc:${esc(col)};animation-delay:${i * 50}ms">
+      <div class="game-cover ${cover ? '' : 'noimg'}" onclick="playGame('${esc(g.id)}')">${coverHtml}</div>
+      <div class="game-body">
+        <div class="game-tags">${tags}</div>
+        <div class="game-title">${esc(g.title || 'เกม')}</div>
+        ${g.description ? `<div class="game-desc">${esc(g.description)}</div>` : ''}
+        <div class="game-actions">
+          <button class="btn btn-primary btn-sm" onclick="playGame('${esc(g.id)}')">▶️ เล่นเลย</button>
+        </div>
+        <div class="game-tools teacher-only">
+          <button class="btn btn-outline btn-sm" onclick="openGameForm('${esc(g.id)}')">✏️ แก้ไข</button>
+          <button class="btn btn-danger btn-sm" onclick="confirmDeleteGame('${esc(g.id)}')">🗑️ ลบ</button>
+        </div>
+      </div>
+    </div>`;
+}
+
+function findGame(id) { return state.games.find(g => g.id === id); }
+
+// เล่นเกม: เปิดแท็บใหม่ หรือฝังเต็มจอ (ถ้าครูตั้งเป็น embed)
+function playGame(id) {
+  const g = findGame(id);
+  if (!g || !g.link) { toast('เกมนี้ยังไม่มีลิงก์', 'error'); return; }
+  if ((g.link_type || 'link') === 'embed') openGameEmbed(g);
+  else window.open(g.link, '_blank', 'noopener');
+}
+
+function openGameEmbed(g) {
+  const old = document.getElementById('gameOverlay');
+  if (old) old.remove();
+  const overlay = document.createElement('div');
+  overlay.id = 'gameOverlay';
+  overlay.className = 'game-overlay';
+  overlay.innerHTML = `
+    <div class="game-bar">
+      <span class="game-bar-title">🎮 ${esc(g.title || 'เกม')}</span>
+      <span class="game-bar-actions">
+        <a class="btn btn-outline btn-sm" href="${esc(g.link)}" target="_blank" rel="noopener">เปิดแท็บใหม่ ↗</a>
+        <button class="btn btn-danger btn-sm" onclick="closeGameEmbed()">✖ ปิด</button>
+      </span>
+    </div>
+    <iframe class="game-frame" src="${esc(g.link)}" allow="fullscreen; autoplay; gamepad" allowfullscreen></iframe>
+    <div class="game-fallback">ถ้าเกมไม่ขึ้น เกมนี้อาจไม่อนุญาตให้ฝัง — กด "เปิดแท็บใหม่" ด้านบนได้เลย</div>`;
+  document.body.appendChild(overlay);
+  document.body.classList.add('game-open');
+}
+function closeGameEmbed() {
+  const o = document.getElementById('gameOverlay');
+  if (o) o.remove();
+  document.body.classList.remove('game-open');
+}
+
+// ฟอร์มเพิ่ม/แก้ไขเกม (เฉพาะครู)
+function openGameForm(id) {
+  const g = id ? findGame(id) || {} : {};
+  const isEdit = !!id;
+  const catOptions = GAME_CATEGORIES.map(c => `<option value="${esc(c)}"></option>`).join('');
+  openModal(isEdit ? 'แก้ไขเกม' : 'เพิ่มเกมใหม่', `
+    <form id="gameForm" novalidate>
+      <div class="field"><label>ชื่อเกม <span class="req">*</span></label><input name="title" value="${esc(g.title || '')}" placeholder="เช่น เกมจับคู่คำศัพท์" /><div class="err">กรุณากรอกชื่อเกม</div></div>
+      <div class="field"><label>คำอธิบายสั้น ๆ</label><textarea name="description" placeholder="เล่นยังไง/ฝึกอะไร">${esc(g.description || '')}</textarea></div>
+      <div class="field"><label>ลิงก์เกม <span class="req">*</span></label><input name="link" value="${esc(g.link || '')}" placeholder="https://... (เช่น Wordwall, Blooket, ABCya)" /><div class="err">กรุณากรอกลิงก์ (ขึ้นต้น http)</div></div>
+      <div class="row2">
+        <div class="field">
+          <label>เปิดเกมแบบ</label>
+          <select name="link_type">
+            <option value="link" ${(g.link_type||'link')==='link'?'selected':''}>เปิดแท็บใหม่ (แนะนำ ปลอดภัยสุด)</option>
+            <option value="embed" ${g.link_type==='embed'?'selected':''}>ฝังเล่นในหน้า (เฉพาะเกมที่อนุญาตให้ฝัง)</option>
+          </select>
+        </div>
+        <div class="field">
+          <label>หมวด (กลุ่มสาระ)</label>
+          <input name="category" list="gameCatList" value="${esc(g.category || '')}" placeholder="เลือกหรือพิมพ์เอง" />
+          <datalist id="gameCatList">${catOptions}</datalist>
+        </div>
+      </div>
+      <div class="row2">
+        <div class="field"><label>ระดับชั้น (ถ้ามี)</label><input name="grade" value="${esc(g.grade || '')}" placeholder="เช่น ป.5 (เว้นว่างได้)" /></div>
+        <div class="field"><label>ลำดับการแสดง</label><input type="number" name="order" value="${esc(g.order || (state.games.length + 1))}" /></div>
+      </div>
+      ${imageField('cover_image', 'รูปปกเกม (ถ้ามี)', g.cover_image)}
+      <div class="field"><label>การแสดงผล</label><select name="status"><option value="active" ${(g.status||'active')==='active'?'selected':''}>แสดง (เปิด)</option><option value="inactive" ${g.status==='inactive'?'selected':''}>ซ่อน (ปิด)</option></select></div>
+      <div class="form-actions">
+        <button type="button" class="btn btn-outline" onclick="closeModal()">ยกเลิก</button>
+        <button type="submit" class="btn btn-primary">${isEdit ? 'บันทึกการแก้ไข' : 'เพิ่มเกม'}</button>
+      </div>
+    </form>
+  `);
+  wireImageField('cover_image', $('#modalBody'));
+  $('#gameForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const f = e.target;
+    const title = f.elements.title.value.trim();
+    const link = f.elements.link.value.trim();
+    const linkOk = /^https?:\/\//i.test(link);
+    f.elements.title.closest('.field').classList.toggle('invalid', !title);
+    f.elements.link.closest('.field').classList.toggle('invalid', !linkOk);
+    if (!title || !linkOk) return;
+
+    const item = {
+      id: g.id || '', title, description: f.elements.description.value.trim(),
+      link, link_type: f.elements.link_type.value,
+      cover_image: f.elements.cover_image.value.trim(),
+      category: f.elements.category.value.trim(),
+      grade: f.elements.grade.value.trim(),
+      order: Number(f.elements.order.value) || 0,
+      status: f.elements.status.value
+    };
+    await submitForm(f, () => apiPost('saveGame', { item }), 'บันทึกเกมแล้ว', () => { invalidateCache(); renderGamesPage(); });
+  });
+}
+
+function confirmDeleteGame(id) {
+  const g = findGame(id) || {};
+  openConfirm('ต้องการลบเกมนี้ใช่ไหม?', g.title || '', '', async () => {
+    await apiPost('deleteGame', { id });
+    invalidateCache(); renderGamesPage();
+  });
+}
+
+/* ============================================================================
    11) หน้าวิชา — แสดงบทเรียนของวิชานั้น
    ============================================================================ */
 async function renderSubject(subjectId) {
@@ -871,7 +1131,9 @@ async function renderLesson(lessonId) {
     loaderSet(55);
     lesson = findLessonInCache(lessonId);
     if (!lesson) { app.innerHTML = viewEmpty('🔍', 'ไม่พบบทเรียนนี้', 'อาจถูกลบไปแล้ว'); loaderDone(); return; }
-    works = await apiGet('getWorks', { lesson_id: lessonId });   // ยิงเฉพาะ "ผลงาน" ของบทนี้
+    works = isTeacher()
+      ? await apiPost('getWorksAll', { lesson_id: lessonId })   // ครู: เห็นทั้งหมด รวมที่รออนุมัติ
+      : await apiGet('getWorks', { lesson_id: lessonId });       // คนทั่วไป: เฉพาะที่อนุมัติแล้ว
     state.worksCache[lessonId] = works || [];
     loaderSet(88);
   } catch (err) { app.innerHTML = viewError(err.message); loaderDone(); return; }
@@ -939,8 +1201,12 @@ async function renderLesson(lessonId) {
     ${(isVideo && regOn) ? videoRosterSection(lesson) : ''}
 
     <div class="section-head">
-      <h2>🎨 ผลงานนักเรียน <span class="count">(${works.length})</span></h2>
+      <h2>🎨 ผลงานนักเรียน <span class="count">(${works.length})</span>${
+        (isTeacher() && works.filter(w => (w.status || 'approved') === 'pending').length)
+          ? ` <span class="pending-count">⏳ รออนุมัติ ${works.filter(w => (w.status || 'approved') === 'pending').length}</span>` : ''
+      }</h2>
       <button class="btn btn-accent teacher-only" onclick="openWorkForm(null,'${esc(lesson.id)}')">➕ เพิ่มผลงาน</button>
+      <button class="btn btn-accent student-only" onclick="openSubmitWorkForm('${esc(lesson.id)}')">➕ ส่งผลงานของฉัน</button>
     </div>
     ${worksHtml}
   `;
@@ -967,8 +1233,9 @@ function findLessonInCache(lessonId) {
 function workCard(w, i) {
   const img = imgUrl(w.image);
   const imgHtml = img ? `<img src="${esc(img)}" alt="" loading="lazy" onerror="this.parentNode.innerHTML='🖼️'" />` : '🖼️';
+  const pending = (w.status || 'approved') === 'pending';
   const inner = `
-    <div class="work-img">${imgHtml}</div>
+    <div class="work-img">${pending ? '<span class="work-pending-tag">⏳ รออนุมัติ</span>' : ''}${imgHtml}</div>
     <div class="work-info">
       <div class="t">${esc(w.work_title || 'ผลงาน')}</div>
       <div class="by">โดย ${esc(w.student_name || '-')}</div>
@@ -977,13 +1244,96 @@ function workCard(w, i) {
     ? `<a href="${esc(w.work_link)}" target="_blank" rel="noopener">${inner}</a>`
     : inner;
   return `
-    <div class="work-card" style="animation-delay:${i * 50}ms">
+    <div class="work-card ${pending ? 'is-pending' : ''}" style="animation-delay:${i * 50}ms">
       ${linked}
       <div class="work-tools">
+        ${pending ? `<button class="btn btn-primary btn-sm" onclick="approveWork('${esc(w.id)}','${esc(w.lesson_id)}')">✅ อนุมัติ</button>` : ''}
         <button class="btn btn-outline btn-sm" onclick="openWorkForm('${esc(w.id)}','${esc(w.lesson_id)}')">✏️</button>
-        <button class="btn btn-danger btn-sm" onclick="confirmDeleteWork('${esc(w.id)}','${esc(w.lesson_id)}')">🗑️</button>
+        <button class="btn btn-danger btn-sm" onclick="confirmDeleteWork('${esc(w.id)}','${esc(w.lesson_id)}')">${pending ? '✖️' : '🗑️'}</button>
       </div>
     </div>`;
+}
+
+// ครูอนุมัติผลงาน
+async function approveWork(id, lessonId) {
+  try {
+    await apiPost('approveWork', { id });
+    toast('อนุมัติผลงานแล้ว ✅', 'success');
+    renderLesson(lessonId);
+  } catch (err) { toast(err.message, 'error'); }
+}
+
+// ฟอร์มให้ "นักเรียน" ส่งผลงานเอง (ส่งแล้วรอครูอนุมัติ) — แนบรูปได้
+function openSubmitWorkForm(lessonId) {
+  const lesson = findLessonInCache(lessonId) || {};
+  const info = getStudentInfo();
+  openModal('➕ ส่งผลงานของฉัน', `
+    <form id="submitWorkForm" novalidate>
+      <p class="reg-formhint">ส่งผลงานเข้าบท "<b>${esc(lesson.lesson_name || '')}</b>" — ผลงานจะแสดงหลังคุณครูอนุมัติ</p>
+      <div class="field"><label>ชื่อ-นามสกุล <span class="req">*</span></label><input name="student_name" value="${esc(info.student_name || '')}" placeholder="เช่น เด็กหญิงมานี ใจดี" /><div class="err">กรุณากรอกชื่อ</div></div>
+      <div class="field"><label>ชื่อผลงาน <span class="req">*</span></label><input name="work_title" placeholder="เช่น ภาพวาดเศษส่วน" /><div class="err">กรุณากรอกชื่อผลงาน</div></div>
+      <div class="field"><label>ลิงก์ผลงาน (ถ้ามี)</label><input name="work_link" placeholder="https://... (เช่น ลิงก์ Google ไดรฟ์ ถ้ามี)" /></div>
+      <div class="field">
+        <label>รูปผลงาน (ถ้ามี)</label>
+        <div class="img-row">
+          <button type="button" class="btn btn-ghost" id="swPick">📷 เลือกรูป</button>
+          <span id="swFileName" class="sw-filename">ยังไม่ได้เลือกรูป</span>
+          <input type="file" accept="image/*" id="swFile" hidden />
+        </div>
+        <div class="image-preview" id="swPreview"></div>
+        <div class="hint">เลือกรูปจากเครื่อง/ถ่ายรูปได้ (ไม่เกิน 8MB)</div>
+      </div>
+      <div class="form-actions">
+        <button type="button" class="btn btn-outline" onclick="closeModal()">ยกเลิก</button>
+        <button type="submit" class="btn btn-accent">📤 ส่งผลงาน</button>
+      </div>
+    </form>
+  `);
+
+  let pickedFile = null;
+  const fileInput = $('#swFile');
+  $('#swPick').onclick = () => fileInput.click();
+  fileInput.addEventListener('change', () => {
+    const f = fileInput.files[0];
+    if (!f) return;
+    if (f.size > 8 * 1024 * 1024) { toast('ไฟล์ใหญ่เกิน 8MB กรุณาเลือกรูปเล็กลง', 'error'); fileInput.value = ''; return; }
+    pickedFile = f;
+    $('#swFileName').textContent = f.name;
+    const reader = new FileReader();
+    reader.onload = () => { $('#swPreview').innerHTML = `<img src="${reader.result}" alt="" />`; $('#swPreview').classList.add('show'); };
+    reader.readAsDataURL(f);
+  });
+
+  $('#submitWorkForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const f = e.target;
+    const name = f.elements.student_name.value.trim();
+    const title = f.elements.work_title.value.trim();
+    f.elements.student_name.closest('.field').classList.toggle('invalid', !name);
+    f.elements.work_title.closest('.field').classList.toggle('invalid', !title);
+    if (!name || !title) return;
+
+    const payload = {
+      item: { lesson_id: lessonId, student_name: name, work_title: title, work_link: f.elements.work_link.value.trim() }
+    };
+    const btn = f.querySelector('button[type=submit]');
+    btn.disabled = true; btn.textContent = 'กำลังส่ง...';
+    try {
+      if (pickedFile) {
+        payload.base64 = await fileToBase64(pickedFile);
+        payload.mimeType = pickedFile.type;
+        payload.filename = pickedFile.name;
+      }
+      // จำชื่อไว้ในเครื่องเพื่อความสะดวกครั้งหน้า
+      saveStudentInfo({ student_name: name, student_class: info.student_class || '', student_no: info.student_no || '' });
+      await apiPost('submitWork', payload);
+      closeModal();
+      toast('ส่งผลงานแล้ว 🎉 รอคุณครูอนุมัติเพื่อแสดงนะ', 'success');
+    } catch (err) {
+      toast(err.message, 'error');
+      btn.disabled = false; btn.textContent = '📤 ส่งผลงาน';
+    }
+  });
 }
 
 /* ============================================================================
@@ -1469,7 +1819,7 @@ function renderRoster(lessonId, list) {
           <span>${esc(v.student_class || '-')}</span>
           <span>${esc(v.student_no || '-')}</span>
           <span class="r-status">${statusHtml}</span>
-          <span class="r-date">${esc(v.date || '')}</span>
+          <span class="r-date">${esc(formatThaiDateTime(v.date))}</span>
           <span class="r-act"><button class="btn btn-danger btn-sm" onclick="confirmDeleteView('${esc(v.id)}','${esc(lessonId)}')">🗑️</button></span>
         </div>`;
       }).join('')}
@@ -1866,7 +2216,8 @@ function openWorkForm(id, lessonId) {
       id: work.id || '', lesson_id: lessonId,
       student_name: name, work_title: title,
       work_link: f.elements.work_link.value.trim(), image: f.elements.image.value.trim(),
-      date: work.date || today
+      date: work.date || today,
+      status: 'approved'    // ครูบันทึกเอง = อนุมัติทันที (ถ้าเป็นของที่นักเรียนส่งมา เท่ากับอนุมัติ)
     };
     await submitForm(f, () => apiPost('saveWork', { item }), 'บันทึกผลงานแล้ว', () => {
       state.worksCache[lessonId] = []; renderLesson(lessonId);
