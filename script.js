@@ -19,6 +19,7 @@ const state = {
   subjects: [],
   announcements: [],  // ประชาสัมพันธ์
   games: [],          // เกมเสริมการเรียนรู้
+  units: [],          // หน่วยการเรียน
   stats: null,        // สถิติสรุปหน้าแรก
   recentWorks: [],    // ผลงานนักเรียนล่าสุด
   lessonsCache: {},   // เก็บบทเรียนแยกตาม subject_id
@@ -349,6 +350,8 @@ async function router() {
   if (params.get('view') === 'settings') return renderSettings();
   if (params.get('view') === 'me') return renderMyPage();
   if (params.get('view') === 'games') return renderGamesPage();
+  if (params.get('grade')) return renderGrade(params.get('grade'));
+  if (params.get('unit')) return renderUnit(params.get('unit'));
   if (params.get('lesson')) return renderLesson(params.get('lesson'));
   if (params.get('subject')) return renderSubject(params.get('subject'));
   return renderHome();
@@ -367,15 +370,42 @@ async function loadCore(force) {
   state.recentWorks = Array.isArray(data.recentWorks) ? data.recentWorks : [];
   state.games = (data.games || []).sort(byOrder);
 
-  // จัดบทเรียนทั้งหมดเข้า cache แยกตามวิชา (เพื่อให้หน้า วิชา/บทเรียน ใช้ได้ทันที)
+  // จัดบทเรียนทั้งหมดเข้า cache แยกตามวิชา (เพื่อให้หน้า วิชา/หน่วย/บทเรียน ใช้ได้ทันที)
+  state.lessons = (data.lessons || []);              // บทเรียนทั้งหมด (flat)
   state.lessonsCache = {};
-  (data.lessons || []).forEach(l => {
+  state.lessons.forEach(l => {
     (state.lessonsCache[l.subject_id] = state.lessonsCache[l.subject_id] || []).push(l);
   });
   Object.keys(state.lessonsCache).forEach(sid => state.lessonsCache[sid].sort(byOrder));
 
+  // จัดหน่วยการเรียนแยกตามวิชา
+  state.units = (data.units || []);
+  state.unitsCache = {};
+  state.units.forEach(u => {
+    (state.unitsCache[u.subject_id] = state.unitsCache[u.subject_id] || []).push(u);
+  });
+  Object.keys(state.unitsCache).forEach(sid => state.unitsCache[sid].sort(byOrder));
+
   state._loaded = true;
   applyTheme();
+}
+
+/* ---- ตัวช่วยเข้าถึงข้อมูลตามลำดับชั้น ---- */
+function findSubject(id) { return state.subjects.find(s => s.id === id); }
+function findUnit(id) { return (state.units || []).find(u => u.id === id); }
+function subjectsOfGrade(grade) {
+  if (grade === 'ไม่ระบุชั้น') return state.subjects.filter(s => !String(s.grade || '').trim());
+  return state.subjects.filter(s => String(s.grade || '').trim() === grade);
+}
+function lessonsOfSubject(subjectId) { return state.lessonsCache[subjectId] || []; }
+function lessonsOfUnit(unitId) { return (state.lessons || []).filter(l => String(l.unit_id || '') === String(unitId)).sort(byOrder); }
+// หน่วยของวิชา + หน่วยเสมือน "บทเรียนทั่วไป" สำหรับบทเรียนที่ยังไม่จัดหน่วย (กันบทเรียนเดิมหาย)
+function unitsOfSubject(subjectId, forTeacher) {
+  let units = (state.unitsCache[subjectId] || []).filter(u => forTeacher || (u.status || 'active') === 'active');
+  const orphan = lessonsOfSubject(subjectId).filter(l => !String(l.unit_id || '').trim());
+  const list = units.slice();
+  if (orphan.length) list.push({ id: 'none:' + subjectId, subject_id: subjectId, unit_name: 'บทเรียนทั่วไป (ยังไม่จัดหน่วย)', _virtual: true, _count: orphan.length });
+  return list;
 }
 
 // บังคับให้โหลดข้อมูลใหม่รอบหน้า (เรียกหลังครูเพิ่ม/แก้/ลบ)
@@ -423,19 +453,8 @@ async function renderHome() {
       ${dotsHtml}
     </section>`;
 
-  // เลือกวิชาที่จะแสดง: นักเรียนเห็นเฉพาะ active / ครูเห็นทั้งหมด
-  const subjects = state.subjects.filter(x => isTeacher() || (x.status || 'active') === 'active');
-
-  // แถบค้นหา + ปุ่มกรองตามระดับชั้น (สร้างจากข้อมูลจริง) — แสดงเมื่อมีวิชาเท่านั้น
-  const grades = gradesList();
-  const filterBar = subjects.length ? `
-    <div class="filter-bar">
-      <input id="homeSearch" class="search-input" type="search" placeholder="🔍 ค้นหาวิชาหรือบทเรียน..." value="${esc(homeSearch)}" />
-      ${grades.length > 1 ? `<div class="grade-chips">
-        <button class="chip ${homeGrade === '' ? 'active' : ''}" data-grade="">ทั้งหมด</button>
-        ${grades.map(g => `<button class="chip ${homeGrade === g ? 'active' : ''}" data-grade="${esc(g)}">${esc(g)}</button>`).join('')}
-      </div>` : ''}
-    </div>` : '';
+  // ระดับชั้นที่จะแสดง (สร้างจากวิชาที่มีอยู่)
+  const grades = homeGrades();
 
   loaderSet(97);                     // กำลังจะวาดหน้าแล้ว
   app.innerHTML = `
@@ -444,11 +463,12 @@ async function renderHome() {
     ${announcementsSection()}
 
     <div class="section-head">
-      <h2>วิชาทั้งหมด <span class="count">(${subjects.length})</span></h2>
+      <h2>เลือกระดับชั้น <span class="count">(${grades.length})</span></h2>
       <button class="btn btn-primary teacher-only" onclick="openSubjectForm()">➕ เพิ่มวิชา</button>
     </div>
-    ${filterBar}
-    <div id="subjectGrid"></div>
+    ${grades.length
+      ? `<div class="grid">${grades.map((g, i) => gradeCard(g, i)).join('')}</div>`
+      : viewEmpty('🌱', 'ยังไม่มีชั้นเรียน', isTeacher() ? 'กดปุ่ม "เพิ่มวิชา" แล้วระบุระดับชั้น เพื่อสร้างชั้นเรียน' : 'คุณครูกำลังเตรียมบทเรียนอยู่ แวะมาใหม่นะ')}
 
     ${gamesSummarySection()}
     ${featuredWorksSection()}
@@ -456,62 +476,68 @@ async function renderHome() {
   `;
 
   loaderDone();          // โหลดเสร็จสมบูรณ์ -> หน้าจอโหลดวิ่งไป 100% แล้วเฟดหาย
-  setupHomeFilter();     // ผูกช่องค้นหา/ปุ่มกรอง แล้ววาดการ์ดวิชาครั้งแรก
   animateStats();        // ทำเลขสถิติวิ่งขึ้น
   startHeroRotation();   // เริ่มสลับรูปปกอัตโนมัติ (ถ้ามีหลายรูป)
 }
 
-/* ---- ค้นหา + กรองตามระดับชั้น (หน้าแรก) ---- */
-let homeSearch = '';   // คำค้นปัจจุบัน
-let homeGrade = '';    // ชั้นที่เลือก ('' = ทั้งหมด)
-
-// รวบรายชื่อระดับชั้นจากวิชาทั้งหมด (ไม่ซ้ำ เรียงตามธรรมชาติ เช่น ป.1..ป.6)
-function gradesList() {
+// รายชื่อระดับชั้นที่จะโชว์หน้าแรก (เฉพาะชั้นที่มีวิชาแสดงได้) เรียงตามธรรมชาติ (ป.1..ป.6)
+function homeGrades() {
   const set = [];
-  state.subjects.forEach(s => { const g = String(s.grade || '').trim(); if (g && !set.includes(g)) set.push(g); });
+  let hasBlank = false;
+  state.subjects.forEach(s => {
+    if (!isTeacher() && (s.status || 'active') !== 'active') return;
+    const g = String(s.grade || '').trim();
+    if (!g) { hasBlank = true; return; }
+    if (!set.includes(g)) set.push(g);
+  });
   set.sort((a, b) => a.localeCompare(b, 'th', { numeric: true }));
+  if (hasBlank) set.push('ไม่ระบุชั้น');   // วิชาที่ยังไม่ระบุชั้น ไปรวมกลุ่มนี้ (กันหาย)
   return set;
 }
+function gradesList() { return homeGrades(); }
 
-function setupHomeFilter() {
-  const search = document.getElementById('homeSearch');
-  if (search) {
-    search.addEventListener('input', () => { homeSearch = search.value; renderSubjectGrid(); });
-  }
-  document.querySelectorAll('.grade-chips .chip').forEach(chip => {
-    chip.addEventListener('click', () => {
-      homeGrade = chip.dataset.grade || '';
-      document.querySelectorAll('.grade-chips .chip').forEach(c => c.classList.toggle('active', c === chip));
-      renderSubjectGrid();
-    });
-  });
-  renderSubjectGrid();
+// การ์ดระดับชั้น 1 ใบ
+function gradeCard(grade, i) {
+  const subs = subjectsOfGrade(grade).filter(x => isTeacher() || (x.status || 'active') === 'active');
+  const icons = subs.slice(0, 5).map(s => esc(s.icon || '📘')).join(' ');
+  const colors = ['#4f8cff', '#22c55e', '#f59e0b', '#a855f7', '#ec4899', '#06b6d4'];
+  const col = colors[i % colors.length];
+  return `
+    <div class="card grade-card" style="animation-delay:${i * 60}ms;--c1:${col};--c2:${col}"
+         onclick="goGrade('${esc(grade)}')" tabindex="0" onkeydown="if(event.key==='Enter')goGrade('${esc(grade)}')">
+      <div class="card-cover gradient" style="--c1:${col};--c2:${col}">
+        <span class="grade-emoji">${icons || '🏫'}</span>
+      </div>
+      <div class="card-body">
+        <div class="card-title">🏫 ${esc(grade)}</div>
+        <div class="card-desc">${subs.length} วิชา</div>
+      </div>
+    </div>`;
 }
+function goGrade(g) { location.hash = 'grade=' + encodeURIComponent(g); }
 
-// วาดเฉพาะการ์ดวิชา ตามคำค้น + ชั้นที่เลือก (ทำในหน่วยความจำ จึงเร็วทันที)
-function renderSubjectGrid() {
-  const box = document.getElementById('subjectGrid');
-  if (!box) return;
-  const q = homeSearch.trim().toLowerCase();
-  let list = state.subjects.filter(x => isTeacher() || (x.status || 'active') === 'active');
+/* ============================================================================
+   10.2) หน้าระดับชั้น — แสดงรายวิชาของชั้นนั้น
+   ============================================================================ */
+async function renderGrade(grade) {
+  loaderSet(25);
+  app.innerHTML = viewSkeleton();
+  try { await loadCore(); loaderSet(90); }
+  catch (err) { app.innerHTML = viewError(err.message); loaderDone(); return; }
 
-  if (homeGrade) list = list.filter(s => String(s.grade || '').trim() === homeGrade);
+  const subjects = subjectsOfGrade(grade).filter(x => isTeacher() || (x.status || 'active') === 'active').sort(byOrder);
 
-  if (q) {
-    list = list.filter(s => {
-      const inSubject = String(s.subject_name || '').toLowerCase().includes(q) || String(s.grade || '').toLowerCase().includes(q);
-      const lessons = state.lessonsCache[s.id] || [];
-      const inLesson = lessons.some(l =>
-        String(l.lesson_name || '').toLowerCase().includes(q) || String(l.description || '').toLowerCase().includes(q));
-      return inSubject || inLesson;
-    });
-  }
-
-  if (!list.length) {
-    box.innerHTML = viewEmpty('🔍', 'ไม่พบผลลัพธ์', 'ลองค้นด้วยคำอื่น หรือเลือกระดับชั้นอื่น');
-    return;
-  }
-  box.innerHTML = `<div class="grid">${list.map((sub, i) => subjectCard(sub, i)).join('')}</div>`;
+  app.innerHTML = `
+    <nav class="crumbs"><a href="#">หน้าหลัก</a><span class="sep">›</span><span>🏫 ${esc(grade)}</span></nav>
+    <div class="section-head">
+      <h2>🏫 ${esc(grade)} <span class="count">(${subjects.length} วิชา)</span></h2>
+      <button class="btn btn-primary teacher-only" onclick="openSubjectForm(null,'${esc(grade)}')">➕ เพิ่มวิชา</button>
+    </div>
+    ${subjects.length
+      ? `<div class="grid">${subjects.map((sub, i) => subjectCard(sub, i)).join('')}</div>`
+      : viewEmpty('📭', 'ยังไม่มีวิชาในชั้นนี้', isTeacher() ? 'กดปุ่ม "เพิ่มวิชา" เพื่อเริ่ม' : 'คุณครูกำลังเตรียมบทเรียนอยู่')}
+  `;
+  loaderDone();
 }
 
 /* ---- สลับรูปปก hero อัตโนมัติ ---- */
@@ -969,23 +995,103 @@ async function renderSubject(subjectId) {
     loaderSet(90);
   } catch (err) { app.innerHTML = viewError(err.message); loaderDone(); return; }
 
-  const sub = state.subjects.find(x => x.id === subjectId);
+  const sub = findSubject(subjectId);
   if (!sub) { app.innerHTML = viewEmpty('🔍', 'ไม่พบวิชานี้', 'อาจถูกลบไปแล้ว'); loaderDone(); return; }
 
-  const lessons = (state.lessonsCache[subjectId] || []).filter(x => isTeacher() || (x.status || 'active') === 'active');
+  const units = unitsOfSubject(subjectId, isTeacher());
+
+  let cardsHtml;
+  if (!units.length) {
+    cardsHtml = viewEmpty('📦', 'ยังไม่มีหน่วยการเรียน', isTeacher() ? 'กดปุ่ม "เพิ่มหน่วย" เพื่อเริ่ม แล้วค่อยเพิ่มบทเรียนในหน่วย' : 'คุณครูกำลังเตรียมบทเรียนอยู่');
+  } else {
+    cardsHtml = `<div class="grid">${units.map((u, i) => unitCard(u, i)).join('')}</div>`;
+  }
+
+  app.innerHTML = `
+    <nav class="crumbs">
+      <a href="#">หน้าหลัก</a><span class="sep">›</span>
+      <a href="#grade=${encodeURIComponent(sub.grade || '')}">🏫 ${esc(sub.grade || '')}</a><span class="sep">›</span>
+      <span>${esc(sub.icon || '')} ${esc(sub.subject_name)}</span>
+    </nav>
+    <div class="section-head">
+      <h2>${esc(sub.icon || '')} ${esc(sub.subject_name)} <span class="count">${esc(sub.grade)} · ${units.length} หน่วย</span></h2>
+      <button class="btn btn-primary teacher-only" onclick="openUnitForm(null,'${esc(subjectId)}')">➕ เพิ่มหน่วย</button>
+    </div>
+    ${cardsHtml}
+  `;
+  loaderDone();
+}
+
+// การ์ดหน่วยการเรียน 1 ใบ
+function unitCard(u, i) {
+  const count = u._virtual ? (u._count || 0) : lessonsOfUnit(u.id).filter(x => isTeacher() || (x.status || 'active') === 'active').length;
+  const cover = imgUrl(u.cover_image);
+  const coverHtml = cover
+    ? `<img src="${esc(cover)}" alt="" loading="lazy" onerror="this.parentNode.classList.add('gradient');this.remove()" />`
+    : `<span class="placeholder">📦</span>`;
+  const cls = (!u._virtual && (u.status || 'active') !== 'active') ? 'card unit-card inactive' : 'card unit-card';
+  const tools = u._virtual ? '' : `
+        <div class="card-tools" onclick="event.stopPropagation()">
+          <button class="btn btn-outline btn-sm" onclick="openUnitForm('${esc(u.id)}','${esc(u.subject_id)}')">✏️ แก้ไข</button>
+          <button class="btn btn-danger btn-sm" onclick="confirmDeleteUnit('${esc(u.id)}','${esc(u.subject_id)}')">🗑️ ลบ</button>
+        </div>`;
+  return `
+    <div class="${cls}" style="animation-delay:${i * 60}ms" onclick="goUnit('${esc(u.id)}')" tabindex="0" onkeydown="if(event.key==='Enter')goUnit('${esc(u.id)}')">
+      <div class="card-cover ${cover ? '' : 'gradient'}"><span class="unit-badge">📦 หน่วย</span>${coverHtml}</div>
+      <div class="card-body">
+        <div class="card-title">${esc(u.unit_name)}</div>
+        <div class="card-desc">${u.description ? esc(u.description) + ' · ' : ''}${count} บทเรียน</div>
+        ${tools}
+      </div>
+    </div>`;
+}
+function goUnit(id) { location.hash = 'unit=' + encodeURIComponent(id); }
+
+/* ============================================================================
+   11.5) หน้าหน่วยการเรียน — แสดงบทเรียนในหน่วยนั้น
+   ============================================================================ */
+async function renderUnit(unitId) {
+  loaderSet(25);
+  app.innerHTML = viewSkeleton();
+  try { await loadCore(); loaderSet(90); }
+  catch (err) { app.innerHTML = viewError(err.message); loaderDone(); return; }
+
+  // รองรับหน่วยเสมือน "บทเรียนทั่วไป" (none:<subjectId>) สำหรับบทเรียนที่ยังไม่จัดหน่วย
+  let subjectId, unitName, realUnitId = '';
+  let lessons;
+  if (String(unitId).indexOf('none:') === 0) {
+    subjectId = unitId.slice(5);
+    unitName = 'บทเรียนทั่วไป (ยังไม่จัดหน่วย)';
+    lessons = lessonsOfSubject(subjectId).filter(l => !String(l.unit_id || '').trim());
+  } else {
+    const unit = findUnit(unitId);
+    if (!unit) { app.innerHTML = viewEmpty('🔍', 'ไม่พบหน่วยนี้', 'อาจถูกลบไปแล้ว'); loaderDone(); return; }
+    subjectId = unit.subject_id; unitName = unit.unit_name; realUnitId = unit.id;
+    lessons = lessonsOfUnit(unit.id);
+  }
+  lessons = lessons.filter(x => isTeacher() || (x.status || 'active') === 'active');
+  const sub = findSubject(subjectId) || {};
 
   let cardsHtml;
   if (!lessons.length) {
-    cardsHtml = viewEmpty('📭', 'ยังไม่มีบทเรียน', isTeacher() ? 'กดปุ่ม "เพิ่มบทเรียน" เพื่อเริ่ม' : 'คุณครูกำลังเตรียมบทเรียนนี้อยู่');
+    cardsHtml = viewEmpty('📭', 'ยังไม่มีบทเรียนในหน่วยนี้', isTeacher() ? 'กดปุ่ม "เพิ่มบทเรียน" เพื่อเริ่ม' : 'คุณครูกำลังเตรียมบทเรียนอยู่');
   } else {
     cardsHtml = `<div class="grid">${lessons.map((l, i) => lessonCard(l, i)).join('')}</div>`;
   }
 
+  // ปุ่มเพิ่มบทเรียน: หน่วยจริงจะพรีฟิลหน่วยให้, หน่วยเสมือนเพิ่มแบบไม่จัดหน่วย
+  const addBtn = `<button class="btn btn-primary teacher-only" onclick="openLessonForm(null,'${esc(subjectId)}','${esc(realUnitId)}')">➕ เพิ่มบทเรียน</button>`;
+
   app.innerHTML = `
-    <nav class="crumbs"><a href="#">หน้าหลัก</a><span class="sep">›</span><span>${esc(sub.icon || '')} ${esc(sub.subject_name)} ${esc(sub.grade)}</span></nav>
+    <nav class="crumbs">
+      <a href="#">หน้าหลัก</a><span class="sep">›</span>
+      <a href="#grade=${encodeURIComponent(sub.grade || '')}">🏫 ${esc(sub.grade || '')}</a><span class="sep">›</span>
+      <a href="#subject=${esc(sub.id || '')}">${esc(sub.subject_name || '')}</a><span class="sep">›</span>
+      <span>${esc(unitName)}</span>
+    </nav>
     <div class="section-head">
-      <h2>${esc(sub.icon || '')} ${esc(sub.subject_name)} <span class="count">${esc(sub.grade)} · ${lessons.length} บทเรียน</span></h2>
-      <button class="btn btn-primary teacher-only" onclick="openLessonForm(null,'${esc(subjectId)}')">➕ เพิ่มบทเรียน</button>
+      <h2>📦 ${esc(unitName)} <span class="count">(${lessons.length} บทเรียน)</span></h2>
+      ${addBtn}
     </div>
     ${cardsHtml}
   `;
@@ -1008,13 +1114,18 @@ function lessonCard(l, i) {
         <div class="card-title">${esc(l.lesson_name)}</div>
         <div class="card-desc">${esc(l.description || '')}</div>
         <div class="card-tools" onclick="event.stopPropagation()">
-          <button class="btn btn-outline btn-sm" onclick="openLessonForm('${esc(l.id)}','${esc(l.subject_id)}')">✏️ แก้ไข</button>
-          <button class="btn btn-danger btn-sm" onclick="confirmDeleteLesson('${esc(l.id)}','${esc(l.subject_id)}')">🗑️ ลบ</button>
+          <button class="btn btn-outline btn-sm" onclick="openLessonForm('${esc(l.id)}','${esc(l.subject_id)}','${esc(l.unit_id || '')}')">✏️ แก้ไข</button>
+          <button class="btn btn-danger btn-sm" onclick="confirmDeleteLesson('${esc(l.id)}','${esc(l.subject_id)}','${esc(l.unit_id || '')}')">🗑️ ลบ</button>
         </div>
       </div>
     </div>`;
 }
 function goLesson(id) { location.hash = 'lesson=' + id; }
+
+// เปิดหน้าหน่วยที่บทเรียนสังกัด (ใช้หลังเพิ่ม/แก้/ลบบทเรียน)
+function goUnitOfLesson(subjectId, unitId) {
+  location.hash = 'unit=' + encodeURIComponent(unitId ? unitId : ('none:' + subjectId));
+}
 
 /* ============================================================================
    11.5) หน้า "ของฉัน" — รวมบทที่ดูจบ + เกียรติบัตร (อ่านจากเครื่องนักเรียน)
@@ -1174,10 +1285,16 @@ async function renderLesson(lessonId) {
   // เปิดระบบดูจบ/เกียรติบัตรไหม (ครูตั้งค่าได้)
   const regOn = (state.settings.register_enabled || 'yes') !== 'no';
 
+  const _u = findUnit(lesson.unit_id);
+  const _uName = _u ? _u.unit_name : (String(lesson.unit_id || '').trim() ? '' : 'บทเรียนทั่วไป');
+  const _uHash = 'unit=' + encodeURIComponent(lesson.unit_id ? lesson.unit_id : ('none:' + lesson.subject_id));
+
   app.innerHTML = `
     <nav class="crumbs">
       <a href="#">หน้าหลัก</a><span class="sep">›</span>
-      <a href="#subject=${esc(sub.id)}">${esc(sub.subject_name || '')} ${esc(sub.grade || '')}</a><span class="sep">›</span>
+      <a href="#grade=${encodeURIComponent(sub.grade || '')}">🏫 ${esc(sub.grade || '')}</a><span class="sep">›</span>
+      <a href="#subject=${esc(sub.id)}">${esc(sub.subject_name || '')}</a><span class="sep">›</span>
+      ${_uName ? `<a href="#${_uHash}">${esc(_uName)}</a><span class="sep">›</span>` : ''}
       <span>${esc(lesson.lesson_name)}</span>
     </nav>
 
@@ -1188,7 +1305,7 @@ async function renderLesson(lessonId) {
         <p>${esc(lesson.description || '')}</p>
         <div class="lesson-actions">
           ${actionHtml}
-          <button class="btn btn-outline teacher-only" onclick="openLessonForm('${esc(lesson.id)}','${esc(lesson.subject_id)}')">✏️ แก้ไขบทเรียน</button>
+          <button class="btn btn-outline teacher-only" onclick="openLessonForm('${esc(lesson.id)}','${esc(lesson.subject_id)}','${esc(lesson.unit_id || '')}')">✏️ แก้ไขบทเรียน</button>
           ${(isVideo && ytId) ? `<button class="btn btn-outline teacher-only" onclick="openQuizEditor('${esc(lesson.id)}')">📝 จัดการแบบทดสอบ</button>` : ''}
         </div>
       </div>
@@ -2063,14 +2180,15 @@ function fileToBase64(file) {
 /* ============================================================================
    15) ฟอร์มเพิ่ม/แก้ไข วิชา
    ============================================================================ */
-function openSubjectForm(id) {
+function openSubjectForm(id, presetGrade) {
   const sub = id ? state.subjects.find(x => x.id === id) : {};
   const isEdit = !!id;
+  const gradeVal = sub.grade || presetGrade || '';
   openModal(isEdit ? 'แก้ไขวิชา' : 'เพิ่มวิชาใหม่', `
     <form id="subjectForm" novalidate>
       <div class="row2">
         <div class="field"><label>ชื่อวิชา <span class="req">*</span></label><input name="subject_name" value="${esc(sub.subject_name || '')}" placeholder="เช่น คณิตศาสตร์" /><div class="err">กรุณากรอกชื่อวิชา</div></div>
-        <div class="field"><label>ระดับชั้น <span class="req">*</span></label><input name="grade" value="${esc(sub.grade || '')}" placeholder="เช่น ป.4" /><div class="err">กรุณากรอกระดับชั้น</div></div>
+        <div class="field"><label>ระดับชั้น <span class="req">*</span></label><input name="grade" value="${esc(gradeVal)}" placeholder="เช่น ชั้นประถมศึกษาปีที่ 4" /><div class="err">กรุณากรอกระดับชั้น</div><div class="hint">วิชาที่ระดับชั้นเดียวกันจะถูกจัดอยู่ในชั้นเรียนเดียวกัน</div></div>
       </div>
       <div class="row2">
         <div class="field"><label>ไอคอน (อีโมจิ)</label><input name="icon" value="${esc(sub.icon || '📘')}" placeholder="📐" /><div class="hint">เปิดคีย์บอร์ดอีโมจิแล้วเลือกได้เลย</div></div>
@@ -2102,23 +2220,85 @@ function openSubjectForm(id) {
       cover_image: f.elements.cover_image.value.trim(),
       order: Number(f.elements.order.value) || 0, status: f.elements.status.value
     };
-    await submitForm(f, () => apiPost('saveSubject', { item }), 'บันทึกวิชาแล้ว', () => { invalidateCache(); renderHome(); });
+    await submitForm(f, () => apiPost('saveSubject', { item }), 'บันทึกวิชาแล้ว', () => {
+      invalidateCache();
+      location.hash = 'grade=' + encodeURIComponent(grade);   // กลับไปหน้าชั้นเรียนของวิชานี้
+      router();
+    });
   });
+}
+
+/* ============================================================================
+   15.5) ฟอร์มเพิ่ม/แก้ไข หน่วยการเรียน
+   ============================================================================ */
+function openUnitForm(id, subjectId) {
+  const unit = id ? findUnit(id) || {} : {};
+  const sid = subjectId || unit.subject_id || '';
+  const isEdit = !!id;
+  const count = (state.unitsCache[sid] || []).length;
+  openModal(isEdit ? 'แก้ไขหน่วยการเรียน' : 'เพิ่มหน่วยการเรียน', `
+    <form id="unitForm" novalidate>
+      <div class="field"><label>ชื่อหน่วย <span class="req">*</span></label><input name="unit_name" value="${esc(unit.unit_name || '')}" placeholder="เช่น หน่วยที่ 1 จำนวนนับ" /><div class="err">กรุณากรอกชื่อหน่วย</div></div>
+      <div class="field"><label>คำอธิบายสั้น ๆ</label><textarea name="description" placeholder="เนื้อหาในหน่วยนี้">${esc(unit.description || '')}</textarea></div>
+      ${imageField('cover_image', 'รูปปกหน่วย (ถ้ามี)', unit.cover_image)}
+      <div class="row2">
+        <div class="field"><label>ลำดับการแสดง</label><input type="number" name="order" value="${esc(unit.order || (count + 1))}" /><div class="hint">เลขน้อยอยู่ก่อน</div></div>
+        <div class="field"><label>การแสดงผล</label><select name="status"><option value="active" ${(unit.status||'active')==='active'?'selected':''}>แสดง (เปิด)</option><option value="inactive" ${unit.status==='inactive'?'selected':''}>ซ่อน (ปิด)</option></select></div>
+      </div>
+      <div class="form-actions">
+        <button type="button" class="btn btn-outline" onclick="closeModal()">ยกเลิก</button>
+        <button type="submit" class="btn btn-primary">${isEdit ? 'บันทึกการแก้ไข' : 'เพิ่มหน่วย'}</button>
+      </div>
+    </form>
+  `);
+  wireImageField('cover_image', $('#modalBody'));
+  $('#unitForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const f = e.target;
+    const uname = f.elements.unit_name.value.trim();
+    f.elements.unit_name.closest('.field').classList.toggle('invalid', !uname);
+    if (!uname) return;
+    const item = {
+      id: unit.id || '', subject_id: sid, unit_name: uname,
+      description: f.elements.description.value.trim(),
+      cover_image: f.elements.cover_image.value.trim(),
+      order: Number(f.elements.order.value) || 0, status: f.elements.status.value
+    };
+    await submitForm(f, () => apiPost('saveUnit', { item }), 'บันทึกหน่วยแล้ว', () => { invalidateCache(); renderSubject(sid); });
+  });
+}
+
+function confirmDeleteUnit(id, subjectId) {
+  const u = findUnit(id) || {};
+  openConfirm('ต้องการลบหน่วยนี้ใช่ไหม?', u.unit_name || '',
+    'บทเรียนทั้งหมดในหน่วยนี้ (พร้อมผลงาน/การดู/แบบทดสอบ) จะถูกลบไปด้วย', async () => {
+      await apiPost('deleteUnit', { id });
+      invalidateCache(); renderSubject(subjectId);
+    });
 }
 
 /* ============================================================================
    16) ฟอร์มเพิ่ม/แก้ไข บทเรียน
    ============================================================================ */
-function openLessonForm(id, subjectId) {
+function openLessonForm(id, subjectId, unitId) {
   const lesson = id ? findLessonInCache(id) || {} : {};
   const sid = subjectId || lesson.subject_id || '';
+  const uid = (unitId !== undefined && unitId !== null) ? unitId : (lesson.unit_id || '');
   const isEdit = !!id;
   const subjectOptions = state.subjects.map(s =>
     `<option value="${esc(s.id)}" ${s.id === sid ? 'selected' : ''}>${esc(s.subject_name)} ${esc(s.grade)}</option>`).join('');
+  const unitOptionsHtml = (forSid, selUid) => {
+    const us = (state.unitsCache[forSid] || []);
+    return `<option value="">— ไม่จัดหน่วย (บทเรียนทั่วไป) —</option>` +
+      us.map(u => `<option value="${esc(u.id)}" ${String(u.id) === String(selUid) ? 'selected' : ''}>${esc(u.unit_name)}</option>`).join('');
+  };
 
   openModal(isEdit ? 'แก้ไขบทเรียน' : 'เพิ่มบทเรียนใหม่', `
     <form id="lessonForm" novalidate>
-      <div class="field"><label>วิชาที่สังกัด <span class="req">*</span></label><select name="subject_id">${subjectOptions}</select></div>
+      <div class="row2">
+        <div class="field"><label>วิชาที่สังกัด <span class="req">*</span></label><select name="subject_id" id="lf_subject">${subjectOptions}</select></div>
+        <div class="field"><label>หน่วยการเรียน</label><select name="unit_id" id="lf_unit">${unitOptionsHtml(sid, uid)}</select></div>
+      </div>
       <div class="field"><label>ชื่อบทเรียน <span class="req">*</span></label><input name="lesson_name" value="${esc(lesson.lesson_name || '')}" placeholder="เช่น เศษส่วน" /><div class="err">กรุณากรอกชื่อบทเรียน</div></div>
       <div class="field"><label>คำอธิบาย</label><textarea name="description" placeholder="อธิบายสั้นๆ ว่าบทเรียนนี้เกี่ยวกับอะไร">${esc(lesson.description || '')}</textarea></div>
       <div class="field">
@@ -2141,6 +2321,9 @@ function openLessonForm(id, subjectId) {
     </form>
   `);
   wireImageField('cover_image', $('#modalBody'));
+  // เปลี่ยนวิชา -> โหลดรายการหน่วยของวิชานั้นใหม่
+  const subjSel = $('#lf_subject'), unitSel = $('#lf_unit');
+  subjSel.addEventListener('change', () => { unitSel.innerHTML = unitOptionsHtml(subjSel.value, ''); });
   // ปรับป้ายช่องลิงก์ตามชนิดเนื้อหา + เตือนถ้าวิดีโอไม่ใช่ลิงก์ YouTube
   const typeSel = $('#lf_type'), linkLabel = $('#lf_link_label'), linkInput = $('#lf_link'), linkHint = $('#lf_link_hint');
   function syncLinkUI() {
@@ -2172,6 +2355,7 @@ function openLessonForm(id, subjectId) {
 
     const item = {
       id: lesson.id || '', subject_id: f.elements.subject_id.value,
+      unit_id: f.elements.unit_id.value,
       lesson_name: name, description: f.elements.description.value.trim(), link,
       link_type: f.elements.link_type.value,
       cover_image: f.elements.cover_image.value.trim(),
@@ -2179,7 +2363,8 @@ function openLessonForm(id, subjectId) {
     };
     await submitForm(f, () => apiPost('saveLesson', { item }), 'บันทึกบทเรียนแล้ว', () => {
       invalidateCache();        // ให้โหลดบทเรียนชุดใหม่รอบหน้า
-      renderSubject(item.subject_id);
+      goUnitOfLesson(item.subject_id, item.unit_id);   // กลับไปหน้าหน่วยที่บทเรียนอยู่
+      router();
     });
   });
 }
@@ -2317,12 +2502,13 @@ function confirmDeleteSubject(id) {
       invalidateCache(); renderHome();
     });
 }
-function confirmDeleteLesson(id, subjectId) {
+function confirmDeleteLesson(id, subjectId, unitId) {
   const lesson = findLessonInCache(id) || {};
   openConfirm('ต้องการลบบทเรียนนี้ใช่ไหม?', lesson.lesson_name || '',
     'ผลงานนักเรียนในบทเรียนนี้จะถูกลบไปด้วย', async () => {
       await apiPost('deleteLesson', { id });
-      invalidateCache(); renderSubject(subjectId);
+      invalidateCache();
+      goUnitOfLesson(subjectId, unitId); router();
     });
 }
 function confirmDeleteWork(id, lessonId) {
