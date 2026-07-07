@@ -20,6 +20,7 @@ const state = {
   announcements: [],  // ประชาสัมพันธ์
   games: [],          // เกมเสริมการเรียนรู้
   units: [],          // หน่วยการเรียน
+  grades: [],         // ชั้นเรียน
   stats: null,        // สถิติสรุปหน้าแรก
   recentWorks: [],    // ผลงานนักเรียนล่าสุด
   lessonsCache: {},   // เก็บบทเรียนแยกตาม subject_id
@@ -369,6 +370,7 @@ async function loadCore(force) {
   state.stats = data.stats || null;
   state.recentWorks = Array.isArray(data.recentWorks) ? data.recentWorks : [];
   state.games = (data.games || []).sort(byOrder);
+  state.grades = (data.grades || []).sort(byOrder);
 
   // จัดบทเรียนทั้งหมดเข้า cache แยกตามวิชา (เพื่อให้หน้า วิชา/หน่วย/บทเรียน ใช้ได้ทันที)
   state.lessons = (data.lessons || []);              // บทเรียนทั้งหมด (flat)
@@ -393,9 +395,20 @@ async function loadCore(force) {
 /* ---- ตัวช่วยเข้าถึงข้อมูลตามลำดับชั้น ---- */
 function findSubject(id) { return state.subjects.find(s => s.id === id); }
 function findUnit(id) { return (state.units || []).find(u => u.id === id); }
-function subjectsOfGrade(grade) {
-  if (grade === 'ไม่ระบุชั้น') return state.subjects.filter(s => !String(s.grade || '').trim());
-  return state.subjects.filter(s => String(s.grade || '').trim() === grade);
+function findGrade(id) { return (state.grades || []).find(g => g.id === id); }
+// พารามิเตอร์สำหรับลิงก์ไปหน้าชั้น (ใช้ grade_id จริง ถ้าไม่มีก็ใช้ชื่อชั้นแบบเสมือน)
+function gradeParamOf(sub) { return sub && String(sub.grade_id || '').trim() ? sub.grade_id : ('gname:' + String((sub && sub.grade) || '')); }
+// วิชาในชั้นเรียนหนึ่ง — รองรับทั้ง id จริง และชั้นเสมือน 'gname:<ชื่อชั้น>'
+function subjectsOfGrade(param) {
+  if (String(param).indexOf('gname:') === 0) {
+    const name = param.slice(6);
+    return state.subjects.filter(s => !String(s.grade_id || '').trim() && String(s.grade || '').trim() === name);
+  }
+  const g = findGrade(param);
+  const name = g ? String(g.grade_name || '').trim() : '';
+  return state.subjects.filter(s =>
+    String(s.grade_id || '') === String(param) ||
+    (!String(s.grade_id || '').trim() && name && String(s.grade || '').trim() === name));
 }
 function lessonsOfSubject(subjectId) { return state.lessonsCache[subjectId] || []; }
 function lessonsOfUnit(unitId) { return (state.lessons || []).filter(l => String(l.unit_id || '') === String(unitId)).sort(byOrder); }
@@ -453,8 +466,8 @@ async function renderHome() {
       ${dotsHtml}
     </section>`;
 
-  // ระดับชั้นที่จะแสดง (สร้างจากวิชาที่มีอยู่)
-  const grades = homeGrades();
+  // ชั้นเรียนที่จะแสดง (จากแท็บ Grades + เผื่อชั้นที่ยังไม่ได้ย้าย)
+  const grades = homeGradeList();
 
   loaderSet(97);                     // กำลังจะวาดหน้าแล้ว
   app.innerHTML = `
@@ -464,11 +477,11 @@ async function renderHome() {
 
     <div class="section-head">
       <h2>เลือกระดับชั้น <span class="count">(${grades.length})</span></h2>
-      <button class="btn btn-primary teacher-only" onclick="openSubjectForm()">➕ เพิ่มวิชา</button>
+      <button class="btn btn-primary teacher-only" onclick="openGradeForm()">➕ เพิ่มชั้นเรียน</button>
     </div>
     ${grades.length
       ? `<div class="grid">${grades.map((g, i) => gradeCard(g, i)).join('')}</div>`
-      : viewEmpty('🌱', 'ยังไม่มีชั้นเรียน', isTeacher() ? 'กดปุ่ม "เพิ่มวิชา" แล้วระบุระดับชั้น เพื่อสร้างชั้นเรียน' : 'คุณครูกำลังเตรียมบทเรียนอยู่ แวะมาใหม่นะ')}
+      : viewEmpty('🌱', 'ยังไม่มีชั้นเรียน', isTeacher() ? 'กดปุ่ม "เพิ่มชั้นเรียน" เพื่อสร้างชั้นแรก แล้วค่อยเพิ่มวิชาเข้าไป' : 'คุณครูกำลังเตรียมบทเรียนอยู่ แวะมาใหม่นะ')}
 
     ${gamesSummarySection()}
     ${featuredWorksSection()}
@@ -480,58 +493,74 @@ async function renderHome() {
   startHeroRotation();   // เริ่มสลับรูปปกอัตโนมัติ (ถ้ามีหลายรูป)
 }
 
-// รายชื่อระดับชั้นที่จะโชว์หน้าแรก (เฉพาะชั้นที่มีวิชาแสดงได้) เรียงตามธรรมชาติ (ป.1..ป.6)
-function homeGrades() {
-  const set = [];
-  let hasBlank = false;
+// ชั้นเรียนที่จะโชว์หน้าแรก: ชั้นจริง (แท็บ Grades) + ชั้นเสมือนจากวิชาที่ยังไม่ผูกชั้น (กันหาย)
+function homeGradeList() {
+  const list = (state.grades || []).filter(g => isTeacher() || (g.status || 'active') === 'active').slice().sort(byOrder);
+  const names = new Set(list.map(g => String(g.grade_name || '').trim()));
+  const extra = [];
   state.subjects.forEach(s => {
     if (!isTeacher() && (s.status || 'active') !== 'active') return;
-    const g = String(s.grade || '').trim();
-    if (!g) { hasBlank = true; return; }
-    if (!set.includes(g)) set.push(g);
+    const hasId = String(s.grade_id || '').trim() && list.some(g => g.id === s.grade_id);
+    const gname = String(s.grade || '').trim();
+    if (!hasId && gname && !names.has(gname) && !extra.some(e => e.grade_name === gname)) {
+      extra.push({ id: 'gname:' + gname, grade_name: gname, icon: '🏫', color: '', _virtual: true });
+    }
   });
-  set.sort((a, b) => a.localeCompare(b, 'th', { numeric: true }));
-  if (hasBlank) set.push('ไม่ระบุชั้น');   // วิชาที่ยังไม่ระบุชั้น ไปรวมกลุ่มนี้ (กันหาย)
-  return set;
+  return list.concat(extra);
 }
-function gradesList() { return homeGrades(); }
 
-// การ์ดระดับชั้น 1 ใบ
-function gradeCard(grade, i) {
-  const subs = subjectsOfGrade(grade).filter(x => isTeacher() || (x.status || 'active') === 'active');
+// การ์ดชั้นเรียน 1 ใบ
+function gradeCard(g, i) {
+  const subs = subjectsOfGrade(g.id).filter(x => isTeacher() || (x.status || 'active') === 'active');
   const icons = subs.slice(0, 5).map(s => esc(s.icon || '📘')).join(' ');
   const colors = ['#4f8cff', '#22c55e', '#f59e0b', '#a855f7', '#ec4899', '#06b6d4'];
-  const col = colors[i % colors.length];
+  const col = String(g.color || '').trim() || colors[i % colors.length];
+  const cover = imgUrl(g.cover_image);
+  const coverHtml = cover
+    ? `<img src="${esc(cover)}" alt="" loading="lazy" onerror="this.parentNode.classList.add('gradient');this.remove()" />`
+    : `<span class="grade-emoji">${esc(g.icon || '🏫')}</span>`;
+  const inactive = (!g._virtual && (g.status || 'active') !== 'active') ? ' inactive' : '';
+  const tools = g._virtual ? '' : `
+        <div class="card-tools" onclick="event.stopPropagation()">
+          <button class="btn btn-outline btn-sm" onclick="openGradeForm('${esc(g.id)}')">✏️ แก้ไข</button>
+          <button class="btn btn-danger btn-sm" onclick="confirmDeleteGrade('${esc(g.id)}')">🗑️ ลบ</button>
+        </div>`;
   return `
-    <div class="card grade-card" style="animation-delay:${i * 60}ms;--c1:${col};--c2:${col}"
-         onclick="goGrade('${esc(grade)}')" tabindex="0" onkeydown="if(event.key==='Enter')goGrade('${esc(grade)}')">
-      <div class="card-cover gradient" style="--c1:${col};--c2:${col}">
-        <span class="grade-emoji">${icons || '🏫'}</span>
-      </div>
+    <div class="card grade-card${inactive}" style="animation-delay:${i * 60}ms;--c1:${col};--c2:${col}"
+         onclick="goGrade('${esc(g.id)}')" tabindex="0" onkeydown="if(event.key==='Enter')goGrade('${esc(g.id)}')">
+      <div class="card-cover ${cover ? '' : 'gradient'}" style="--c1:${col};--c2:${col}">${coverHtml}</div>
       <div class="card-body">
-        <div class="card-title">🏫 ${esc(grade)}</div>
+        <div class="card-title">🏫 ${esc(g.grade_name || '')}</div>
         <div class="card-desc">${subs.length} วิชา</div>
+        ${tools}
       </div>
     </div>`;
 }
-function goGrade(g) { location.hash = 'grade=' + encodeURIComponent(g); }
+function goGrade(id) { location.hash = 'grade=' + encodeURIComponent(id); }
 
 /* ============================================================================
-   10.2) หน้าระดับชั้น — แสดงรายวิชาของชั้นนั้น
+   10.2) หน้าชั้นเรียน — แสดงรายวิชาของชั้นนั้น
    ============================================================================ */
-async function renderGrade(grade) {
+async function renderGrade(gradeParam) {
   loaderSet(25);
   app.innerHTML = viewSkeleton();
   try { await loadCore(); loaderSet(90); }
   catch (err) { app.innerHTML = viewError(err.message); loaderDone(); return; }
 
-  const subjects = subjectsOfGrade(grade).filter(x => isTeacher() || (x.status || 'active') === 'active').sort(byOrder);
+  const isVirtual = String(gradeParam).indexOf('gname:') === 0;
+  const g = isVirtual ? null : findGrade(gradeParam);
+  const gradeName = isVirtual ? gradeParam.slice(6) : (g ? g.grade_name : '');
+  const subjects = subjectsOfGrade(gradeParam).filter(x => isTeacher() || (x.status || 'active') === 'active').sort(byOrder);
+
+  const addSubjectBtn = (!isVirtual && g)
+    ? `<button class="btn btn-primary teacher-only" onclick="openSubjectForm(null,'${esc(g.id)}')">➕ เพิ่มวิชา</button>`
+    : `<button class="btn btn-primary teacher-only" onclick="openSubjectForm()">➕ เพิ่มวิชา</button>`;
 
   app.innerHTML = `
-    <nav class="crumbs"><a href="#">หน้าหลัก</a><span class="sep">›</span><span>🏫 ${esc(grade)}</span></nav>
+    <nav class="crumbs"><a href="#">หน้าหลัก</a><span class="sep">›</span><span>🏫 ${esc(gradeName)}</span></nav>
     <div class="section-head">
-      <h2>🏫 ${esc(grade)} <span class="count">(${subjects.length} วิชา)</span></h2>
-      <button class="btn btn-primary teacher-only" onclick="openSubjectForm(null,'${esc(grade)}')">➕ เพิ่มวิชา</button>
+      <h2>🏫 ${esc(gradeName)} <span class="count">(${subjects.length} วิชา)</span></h2>
+      ${addSubjectBtn}
     </div>
     ${subjects.length
       ? `<div class="grid">${subjects.map((sub, i) => subjectCard(sub, i)).join('')}</div>`
@@ -1010,7 +1039,7 @@ async function renderSubject(subjectId) {
   app.innerHTML = `
     <nav class="crumbs">
       <a href="#">หน้าหลัก</a><span class="sep">›</span>
-      <a href="#grade=${encodeURIComponent(sub.grade || '')}">🏫 ${esc(sub.grade || '')}</a><span class="sep">›</span>
+      <a href="#grade=${encodeURIComponent(gradeParamOf(sub))}">🏫 ${esc(sub.grade || "")}</a><span class="sep">›</span>
       <span>${esc(sub.icon || '')} ${esc(sub.subject_name)}</span>
     </nav>
     <div class="section-head">
@@ -1085,7 +1114,7 @@ async function renderUnit(unitId) {
   app.innerHTML = `
     <nav class="crumbs">
       <a href="#">หน้าหลัก</a><span class="sep">›</span>
-      <a href="#grade=${encodeURIComponent(sub.grade || '')}">🏫 ${esc(sub.grade || '')}</a><span class="sep">›</span>
+      <a href="#grade=${encodeURIComponent(gradeParamOf(sub))}">🏫 ${esc(sub.grade || "")}</a><span class="sep">›</span>
       <a href="#subject=${esc(sub.id || '')}">${esc(sub.subject_name || '')}</a><span class="sep">›</span>
       <span>${esc(unitName)}</span>
     </nav>
@@ -1292,7 +1321,7 @@ async function renderLesson(lessonId) {
   app.innerHTML = `
     <nav class="crumbs">
       <a href="#">หน้าหลัก</a><span class="sep">›</span>
-      <a href="#grade=${encodeURIComponent(sub.grade || '')}">🏫 ${esc(sub.grade || '')}</a><span class="sep">›</span>
+      <a href="#grade=${encodeURIComponent(gradeParamOf(sub))}">🏫 ${esc(sub.grade || "")}</a><span class="sep">›</span>
       <a href="#subject=${esc(sub.id)}">${esc(sub.subject_name || '')}</a><span class="sep">›</span>
       ${_uName ? `<a href="#${_uHash}">${esc(_uName)}</a><span class="sep">›</span>` : ''}
       <span>${esc(lesson.lesson_name)}</span>
@@ -2180,15 +2209,35 @@ function fileToBase64(file) {
 /* ============================================================================
    15) ฟอร์มเพิ่ม/แก้ไข วิชา
    ============================================================================ */
-function openSubjectForm(id, presetGrade) {
+function openSubjectForm(id, presetGradeId) {
   const sub = id ? state.subjects.find(x => x.id === id) : {};
   const isEdit = !!id;
-  const gradeVal = sub.grade || presetGrade || '';
+  const grades = (state.grades || []).slice().sort(byOrder);
+  const selGid = sub.grade_id || presetGradeId || '';
+
+  // ถ้ายังไม่มีชั้นเรียนเลย ให้สร้างชั้นก่อน
+  if (!grades.length) {
+    openModal('ยังไม่มีชั้นเรียน', `
+      <div class="reg-prompt">
+        <div class="reg-prompt-ic">🏫</div>
+        <p class="reg-prompt-line2">ต้องมี "ชั้นเรียน" ก่อน ถึงจะเพิ่มวิชาเข้าไปได้</p>
+        <p class="reg-prompt-note">กดปุ่มด้านล่างเพื่อสร้างชั้นเรียนแรกก่อนนะ</p>
+      </div>
+      <div class="form-actions">
+        <button type="button" class="btn btn-outline" onclick="closeModal()">ปิด</button>
+        <button type="button" class="btn btn-primary" onclick="openGradeForm()">➕ สร้างชั้นเรียน</button>
+      </div>`);
+    return;
+  }
+
+  const gradeOptions = grades.map(g =>
+    `<option value="${esc(g.id)}" ${g.id === selGid ? 'selected' : ''}>${esc(g.grade_name)}</option>`).join('');
+
   openModal(isEdit ? 'แก้ไขวิชา' : 'เพิ่มวิชาใหม่', `
     <form id="subjectForm" novalidate>
       <div class="row2">
         <div class="field"><label>ชื่อวิชา <span class="req">*</span></label><input name="subject_name" value="${esc(sub.subject_name || '')}" placeholder="เช่น คณิตศาสตร์" /><div class="err">กรุณากรอกชื่อวิชา</div></div>
-        <div class="field"><label>ระดับชั้น <span class="req">*</span></label><input name="grade" value="${esc(gradeVal)}" placeholder="เช่น ชั้นประถมศึกษาปีที่ 4" /><div class="err">กรุณากรอกระดับชั้น</div><div class="hint">วิชาที่ระดับชั้นเดียวกันจะถูกจัดอยู่ในชั้นเรียนเดียวกัน</div></div>
+        <div class="field"><label>ชั้นเรียน <span class="req">*</span></label><select name="grade_id">${gradeOptions}</select><div class="hint">จัดการชั้นเรียนได้ที่หน้าแรก</div></div>
       </div>
       <div class="row2">
         <div class="field"><label>ไอคอน (อีโมจิ)</label><input name="icon" value="${esc(sub.icon || '📘')}" placeholder="📐" /><div class="hint">เปิดคีย์บอร์ดอีโมจิแล้วเลือกได้เลย</div></div>
@@ -2209,23 +2258,77 @@ function openSubjectForm(id, presetGrade) {
   $('#subjectForm').addEventListener('submit', async (e) => {
     e.preventDefault();
     const f = e.target;
-    const name = f.elements.subject_name.value.trim(), grade = f.elements.grade.value.trim();
+    const name = f.elements.subject_name.value.trim();
+    const gradeId = f.elements.grade_id.value;
+    const gradeObj = findGrade(gradeId);
     f.elements.subject_name.closest('.field').classList.toggle('invalid', !name);
-    f.elements.grade.closest('.field').classList.toggle('invalid', !grade);
-    if (!name || !grade) return;
+    if (!name || !gradeId) return;
 
     const item = {
-      id: sub.id || '', subject_name: name, grade,
+      id: sub.id || '', grade_id: gradeId,
+      subject_name: name,
+      grade: gradeObj ? gradeObj.grade_name : (sub.grade || ''),   // เก็บชื่อชั้นไว้ด้วย (ใช้แสดง/สำรอง)
       icon: f.elements.icon.value.trim() || '📘', color: f.elements.color.value,
       cover_image: f.elements.cover_image.value.trim(),
       order: Number(f.elements.order.value) || 0, status: f.elements.status.value
     };
     await submitForm(f, () => apiPost('saveSubject', { item }), 'บันทึกวิชาแล้ว', () => {
       invalidateCache();
-      location.hash = 'grade=' + encodeURIComponent(grade);   // กลับไปหน้าชั้นเรียนของวิชานี้
+      location.hash = 'grade=' + encodeURIComponent(gradeId);   // กลับไปหน้าชั้นเรียนของวิชานี้
       router();
     });
   });
+}
+
+/* ============================================================================
+   14.5) ฟอร์มเพิ่ม/แก้ไข ชั้นเรียน (เฉพาะครู)
+   ============================================================================ */
+function openGradeForm(id) {
+  const g = id ? findGrade(id) || {} : {};
+  const isEdit = !!id;
+  const count = (state.grades || []).length;
+  openModal(isEdit ? 'แก้ไขชั้นเรียน' : 'เพิ่มชั้นเรียนใหม่', `
+    <form id="gradeForm" novalidate>
+      <div class="field"><label>ชื่อชั้นเรียน <span class="req">*</span></label><input name="grade_name" value="${esc(g.grade_name || '')}" placeholder="เช่น ชั้นประถมศึกษาปีที่ 4" /><div class="err">กรุณากรอกชื่อชั้นเรียน</div></div>
+      <div class="row2">
+        <div class="field"><label>ไอคอน (อีโมจิ)</label><input name="icon" value="${esc(g.icon || '🏫')}" placeholder="🏫" /></div>
+        <div class="field"><label>สีประจำชั้น</label><div class="color-field"><input type="color" name="color" value="${esc(g.color || '#4f8cff')}" /></div></div>
+      </div>
+      ${imageField('cover_image', 'รูปปกชั้นเรียน (ถ้ามี)', g.cover_image)}
+      <div class="row2">
+        <div class="field"><label>ลำดับการแสดง</label><input type="number" name="order" value="${esc(g.order || (count + 1))}" /><div class="hint">เลขน้อยอยู่ก่อน</div></div>
+        <div class="field"><label>การแสดงผล</label><select name="status"><option value="active" ${(g.status||'active')==='active'?'selected':''}>แสดง (เปิด)</option><option value="inactive" ${g.status==='inactive'?'selected':''}>ซ่อน (ปิด)</option></select></div>
+      </div>
+      <div class="form-actions">
+        <button type="button" class="btn btn-outline" onclick="closeModal()">ยกเลิก</button>
+        <button type="submit" class="btn btn-primary">${isEdit ? 'บันทึกการแก้ไข' : 'เพิ่มชั้นเรียน'}</button>
+      </div>
+    </form>
+  `);
+  wireImageField('cover_image', $('#modalBody'));
+  $('#gradeForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const f = e.target;
+    const gname = f.elements.grade_name.value.trim();
+    f.elements.grade_name.closest('.field').classList.toggle('invalid', !gname);
+    if (!gname) return;
+    const item = {
+      id: g.id || '', grade_name: gname,
+      icon: f.elements.icon.value.trim() || '🏫', color: f.elements.color.value,
+      cover_image: f.elements.cover_image.value.trim(),
+      order: Number(f.elements.order.value) || 0, status: f.elements.status.value
+    };
+    await submitForm(f, () => apiPost('saveGrade', { item }), 'บันทึกชั้นเรียนแล้ว', () => { invalidateCache(); renderHome(); });
+  });
+}
+
+function confirmDeleteGrade(id) {
+  const g = findGrade(id) || {};
+  openConfirm('ต้องการลบชั้นเรียนนี้ใช่ไหม?', g.grade_name || '',
+    '⚠️ วิชา หน่วย และบทเรียนทั้งหมดในชั้นนี้ จะถูกลบไปด้วย (กู้คืนไม่ได้)', async () => {
+      await apiPost('deleteGrade', { id });
+      invalidateCache(); renderHome();
+    });
 }
 
 /* ============================================================================
